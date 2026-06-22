@@ -1,0 +1,20 @@
+{
+  "id": "real-life-operations",
+  "description": "A blindbox case for a recurring OKR run where metrics can be stale, impact is lagged, and action authority is bounded.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "real-life-operations",
+  "prompt": "Inspect this repository and create tasks/operations-loop.md as the operating runbook for the goal. Treat this as a delegated OKR loop that will run weekly and across agent turns. Do not implement product code, change policy files, send messages, or create anything outside the requested task artifact.",
+  "allowed_paths": [
+    "tasks/operations-loop.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/operations-loop.md"
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/operations-loop.md"
+    }
+  ]
+}

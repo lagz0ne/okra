@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "okra",
+  "version": "0.1.0",
+  "description": "Reverse Tornado OKR workflow skill for running measurable goals with anti-goal guardrails.",
+  "author": {
+    "name": "lagz0ne",
+    "url": "https://github.com/lagz0ne"
+  },
+  "repository": "https://github.com/lagz0ne/okra",
+  "license": "MIT",
+  "skills": [
+    "./skills/reverse-tornado-okr"
+  ]
+}

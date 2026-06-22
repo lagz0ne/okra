@@ -1,0 +1,20 @@
+{
+  "id": "smoke-reverse-tornado",
+  "description": "A minimal blindbox case that checks whether an agent can use the skill to produce a Reverse Tornado loop from a sparse repo.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "simple-repo",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/reverse-tornado-loop.md. Keep the loop grounded in the files present in the repo. Do not implement product code.",
+  "allowed_paths": [
+    "tasks/reverse-tornado-loop.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/reverse-tornado-loop.md"
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/reverse-tornado-loop.md"
+    }
+  ]
+}

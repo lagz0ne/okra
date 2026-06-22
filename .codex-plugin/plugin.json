@@ -1,0 +1,38 @@
+{
+  "name": "okra",
+  "version": "0.1.0",
+  "description": "Reverse Tornado OKR workflow skill for running measurable goals with anti-goal guardrails.",
+  "author": {
+    "name": "lagz0ne",
+    "url": "https://github.com/lagz0ne"
+  },
+  "homepage": "https://github.com/lagz0ne/okra",
+  "repository": "https://github.com/lagz0ne/okra",
+  "license": "MIT",
+  "keywords": [
+    "okr",
+    "goals",
+    "agent-workflow",
+    "skill",
+    "evaluation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Okra",
+    "shortDescription": "Run goals as measured OKR loops with anti-goal guardrails.",
+    "longDescription": "Okra packages the Reverse Tornado OKR skill plus local eval and review infrastructure for testing Claude and Codex behavior against recurring, measurable goals.",
+    "developerName": "lagz0ne",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/lagz0ne/okra",
+    "defaultPrompt": [
+      "Turn this goal into a Reverse Tornado OKR loop.",
+      "Create an operating runbook for this measurable goal.",
+      "Review this OKR loop for freshness and guardrail gaps."
+    ],
+    "brandColor": "#2F7D68"
+  }
+}
