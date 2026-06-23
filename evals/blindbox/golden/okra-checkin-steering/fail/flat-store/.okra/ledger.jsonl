@@ -1,0 +1,3 @@
+{"payload":{"type":"metric_read","metric":"healthy_checkin_rate","value":0.93,"target":0.9,"definition":"share of check-ins that consume worker progress, preserve DKR budget state, carry PKR signals, and emit a steering decision"}}
+{"payload":{"type":"anti_goal_read","metric":"dkr_budget_overrun_count","value":0,"threshold":0}}
+{"payload":{"type":"anti_goal_read","metric":"no_progress_loop_continuation_count","value":0,"threshold":0}}

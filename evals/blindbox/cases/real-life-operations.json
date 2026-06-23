@@ -3,7 +3,7 @@
   "description": "A blindbox case for a recurring OKR run where metrics can be stale, impact is lagged, and action authority is bounded.",
   "skill": "reverse-tornado-okr",
   "fixture": "real-life-operations",
-  "prompt": "Inspect this repository and create tasks/operations-loop.md as the operating runbook for the goal. Treat this as a delegated OKR loop that will run weekly and across agent turns. Do not implement product code, change policy files, send messages, or create anything outside the requested task artifact.",
+  "prompt": "Inspect this repository and create tasks/operations-loop.md as the operating runbook for the goal. Treat this as a delegated OKR loop that will run weekly and across agent turns. DKR learning checkpoints must come before CKR/PKR promotion; CKR remains measurable context, while DKR and PKR are worker scopes. Define orchestrator check-ins that consume file-based worker progress reports under `.okra/workers/<worker-id>/progress.jsonl`; use a ten-minute heartbeat for long-running subagent work in addition to the weekly metric cadence. If the current fixture readings are stale, state the current decision as paused and make the next orchestrator move explicitly refresh/read both named source dashboards, `warehouse.saved_query.activation_weekly_v3` and `warehouse.saved_query.refund_cancel_weekly_v2`, before any dispatch. Do not implement product code, change policy files, send messages, or create anything outside the requested task artifact.",
   "allowed_paths": [
     "tasks/operations-loop.md"
   ],
@@ -14,6 +14,14 @@
     },
     {
       "type": "reverse_tornado_loop",
+      "path": "tasks/operations-loop.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/operations-loop.md"
+    },
+    {
+      "type": "operations_stale_metrics",
       "path": "tasks/operations-loop.md"
     }
   ]

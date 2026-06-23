@@ -1,0 +1,411 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  okra-store.sh init [store]
+  okra-store.sh init-run <run-id> [store]
+  okra-store.sh put <file> [store]
+  okra-store.sh read-content <sha256> [store]
+  okra-store.sh write-content <target> <source-file> [store]
+  okra-store.sh worker-report <worker-id> <payload.json> [store]
+  okra-store.sh append <ledger|flags|checkins> <payload.json> [store]
+  okra-store.sh verify [store]
+  okra-store.sh status [store]
+USAGE
+}
+
+sha_file() {
+  sha256sum -- "$1" | awk '{print $1}'
+}
+
+reject_path_escape() {
+  local label="$1"
+  local path="$2"
+  case "$path" in
+    ""|/*|..|../*|*/..|*/../*)
+      printf '%s must be a workspace-relative path without ..: %s\n' "$label" "$path" >&2
+      exit 2
+      ;;
+  esac
+}
+
+reject_invalid_sha256() {
+  local label="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s must be a 64-character lowercase hex sha256: %s\n' "$label" "$value" >&2
+    exit 2
+  fi
+}
+
+reject_invalid_run_id() {
+  local value="$1"
+  case "$value" in
+    ""|*[!A-Za-z0-9._-]*)
+      printf 'run id must use only letters, numbers, dot, underscore, or hyphen: %s\n' "$value" >&2
+      exit 2
+      ;;
+  esac
+}
+
+content_dir_for_store() {
+  local store="$1"
+  case "$store" in
+    */runs/*) printf '%s/content/sha256\n' "${store%%/runs/*}" ;;
+    *) printf '%s/content/sha256\n' "$store" ;;
+  esac
+}
+
+cmd_init() {
+  local store="${1:-.okra}"
+  mkdir -p "$store/frame" "$store/tree" "$store/content/sha256" "$store/moves" "$store/workers" "$store/runs"
+  touch "$store/ledger.jsonl" "$store/flags.jsonl" "$store/checkins.jsonl"
+  printf 'OKRA store initialized at %s\n' "$store"
+}
+
+cmd_init_run() {
+  local run_id="$1"
+  local root="${2:-.okra}"
+  reject_invalid_run_id "$run_id"
+  mkdir -p "$root/content/sha256" "$root/runs"
+  local run_store="$root/runs/$run_id"
+  mkdir -p "$run_store/frame" "$run_store/tree" "$run_store/moves" "$run_store/workers" "$run_store/drafts"
+  touch "$run_store/ledger.jsonl" "$run_store/flags.jsonl" "$run_store/checkins.jsonl"
+  printf '%s\n' "$run_store"
+}
+
+cmd_put() {
+  local file="$1"
+  local store="${2:-.okra}"
+  test -f "$file"
+  local content_dir
+  content_dir="$(content_dir_for_store "$store")"
+  mkdir -p "$content_dir"
+  local hash
+  hash="$(sha_file "$file")"
+  local dest="$content_dir/$hash"
+  if [ ! -e "$dest" ]; then
+    local tmp
+    tmp="$(mktemp "$content_dir/.tmp.$hash.XXXXXX")"
+    cp -- "$file" "$tmp"
+    mv -n -- "$tmp" "$dest"
+    rm -f -- "$tmp"
+  fi
+  printf '%s\n' "$hash"
+}
+
+append_inline_payload() {
+  local log="$1"
+  local store="$2"
+  local payload="$3"
+  local tmp
+  tmp="$(mktemp)"
+  printf '%s\n' "$payload" > "$tmp"
+  cmd_append "$log" "$tmp" "$store" >/dev/null
+  rm -f "$tmp"
+}
+
+cmd_read_content() {
+  local hash="$1"
+  local store="${2:-.okra}"
+  reject_invalid_sha256 "content hash" "$hash"
+  local content_dir
+  content_dir="$(content_dir_for_store "$store")"
+  local path="$content_dir/$hash"
+  test -f "$path"
+  append_inline_payload "checkins" "$store" "{\"type\":\"content_read\",\"content_sha256\":\"$hash\"}"
+  cat -- "$path"
+}
+
+cmd_write_content() {
+  local target="$1"
+  local source="$2"
+  local store="${3:-.okra}"
+  reject_path_escape "target" "$target"
+  test -f "$source"
+  mkdir -p -- "$(dirname -- "$target")"
+  local hash
+  hash="$(cmd_put "$source" "$store")"
+  cp -- "$source" "$target"
+  append_inline_payload "checkins" "$store" "{\"type\":\"content_write\",\"target\":\"$target\",\"content_sha256\":\"$hash\"}"
+  printf '%s\n' "$hash"
+}
+
+log_path() {
+  case "$1" in
+    ledger|flags|checkins) printf '%s/%s.jsonl\n' "$2" "$1" ;;
+    *) printf 'unknown log: %s\n' "$1" >&2; exit 2 ;;
+  esac
+}
+
+cmd_append() {
+  local log="$1"
+  local payload="$2"
+  local store="${3:-.okra}"
+  local path
+  path="$(log_path "$log" "$store")"
+  append_record_path "$path" "$payload"
+}
+
+append_record_path() {
+  local path="$1"
+  local payload="$2"
+  mkdir -p "$(dirname "$path")"
+  touch "$path"
+  local lock="$path.lock"
+  (
+    flock -x 9
+    python3 - "$path" "$payload" <<'PY'
+import datetime as dt
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+log_path = Path(sys.argv[1])
+payload_path = Path(sys.argv[2])
+
+payload = json.loads(payload_path.read_text(encoding="utf-8"))
+payload_canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+payload_hash = hashlib.sha256(payload_canonical.encode("utf-8")).hexdigest()
+
+last_hash = "GENESIS"
+seq = 1
+lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+if lines:
+    last = json.loads(lines[-1])
+    last_hash = last["record_hash"]
+    seq = int(last["seq"]) + 1
+
+record = {
+    "seq": seq,
+    "recorded_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "prev_hash": last_hash,
+    "payload_sha256": payload_hash,
+    "payload": payload,
+}
+record_canonical = json.dumps(record, sort_keys=True, separators=(",", ":"))
+record["record_hash"] = hashlib.sha256(record_canonical.encode("utf-8")).hexdigest()
+with log_path.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+print(record["record_hash"])
+PY
+  ) 9>"$lock"
+}
+
+cmd_worker_report() {
+  local worker_id="$1"
+  local payload="$2"
+  local store="${3:-.okra}"
+  case "$worker_id" in
+    *[!A-Za-z0-9._-]*|"")
+      printf 'invalid worker id: %s\n' "$worker_id" >&2
+      exit 2
+      ;;
+  esac
+  append_record_path "$store/workers/$worker_id/progress.jsonl" "$payload"
+}
+
+cmd_verify() {
+  local store="${1:-.okra}"
+  python3 - "$store" <<'PY'
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+store = Path(sys.argv[1])
+errors = []
+
+def content_dir_for(store):
+    if store.parent.name == "runs":
+        return store.parent.parent / "content" / "sha256"
+    return store / "content" / "sha256"
+
+def canonical_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+def verify_log_path(path):
+    if not path.exists():
+        errors.append(f"missing log: {path}")
+        return
+    prev = "GENESIS"
+    expected_seq = 1
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"{path}:{lineno}: invalid json: {exc}")
+            continue
+        if record.get("seq") != expected_seq:
+            errors.append(f"{path}:{lineno}: expected seq {expected_seq}, got {record.get('seq')}")
+        if record.get("prev_hash") != prev:
+            errors.append(f"{path}:{lineno}: prev_hash mismatch")
+        payload = record.get("payload")
+        payload_hash = canonical_hash(payload)
+        if record.get("payload_sha256") != payload_hash:
+            errors.append(f"{path}:{lineno}: payload_sha256 mismatch")
+        without_hash = {key: value for key, value in record.items() if key != "record_hash"}
+        record_hash = canonical_hash(without_hash)
+        if record.get("record_hash") != record_hash:
+            errors.append(f"{path}:{lineno}: record_hash mismatch")
+        prev = record.get("record_hash", "")
+        expected_seq += 1
+
+for name in ("ledger", "flags", "checkins"):
+    verify_log_path(store / f"{name}.jsonl")
+
+workers = store / "workers"
+if workers.exists():
+    for path in sorted(workers.glob("*/progress.jsonl")):
+        verify_log_path(path)
+
+content_dir = content_dir_for(store)
+if content_dir.exists():
+    for path in content_dir.iterdir():
+        if path.is_file():
+            if path.name.startswith(".tmp."):
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest != path.name:
+                errors.append(f"content hash mismatch: {path}")
+
+def hash_refs(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in {"content_sha256", "source_content_sha256", "target_content_sha256"} and isinstance(child, str):
+                yield child
+            yield from hash_refs(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from hash_refs(child)
+
+log_paths = [store / f"{name}.jsonl" for name in ("ledger", "flags", "checkins")]
+if workers.exists():
+    log_paths.extend(sorted(workers.glob("*/progress.jsonl")))
+
+for path in log_paths:
+    if not path.exists():
+        continue
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for ref in hash_refs(record.get("payload")):
+            if not (content_dir / ref).is_file():
+                errors.append(f"{path}:{lineno}: missing referenced content hash: {ref}")
+
+status = store / "status.md"
+sources = [store / "ledger.jsonl", store / "flags.jsonl", store / "checkins.jsonl"]
+if workers.exists():
+    sources.extend(sorted(workers.glob("*/progress.jsonl")))
+if status.exists():
+    status_mtime = status.stat().st_mtime
+    for source in sources:
+        if source.exists() and source.stat().st_mtime > status_mtime:
+            errors.append(f"generated status is stale: {status}")
+            break
+
+if errors:
+    for error in errors:
+        print(error, file=sys.stderr)
+    raise SystemExit(1)
+print(f"OKRA store verified: {store}")
+PY
+}
+
+cmd_status() {
+  local store="${1:-.okra}"
+  mkdir -p "$store"
+  python3 - "$store" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+store = Path(sys.argv[1])
+
+def read_last(name):
+    path = store / f"{name}.jsonl"
+    if not path.exists():
+        return 0, "-"
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lines:
+        return 0, "-"
+    record = json.loads(lines[-1])
+    return len(lines), record.get("record_hash", "-")
+
+ledger_count, ledger_hash = read_last("ledger")
+flag_count, flag_hash = read_last("flags")
+checkin_count, checkin_hash = read_last("checkins")
+worker_count = 0
+workers = store / "workers"
+if workers.exists():
+    for path in workers.glob("*/progress.jsonl"):
+        worker_count += len([line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()])
+
+status = f"""# OKRA Store Status
+
+Generated from append-only source records.
+
+| Log | Records | Last Hash |
+| --- | ---: | --- |
+| ledger | {ledger_count} | `{ledger_hash}` |
+| flags | {flag_count} | `{flag_hash}` |
+| checkins | {checkin_count} | `{checkin_hash}` |
+| worker progress | {worker_count} | `per-worker logs` |
+
+This file is a generated view. Do not edit it by hand.
+"""
+(store / "status.md").write_text(status, encoding="utf-8")
+print(store / "status.md")
+PY
+}
+
+main() {
+  local cmd="${1:-}"
+  if [ -z "$cmd" ]; then
+    usage
+    exit 2
+  fi
+  shift || true
+  case "$cmd" in
+    init) cmd_init "${1:-.okra}" ;;
+    init-run)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_init_run "$@"
+      ;;
+    put)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_put "$@"
+      ;;
+    read-content)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_read_content "$@"
+      ;;
+    write-content)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      cmd_write_content "$@"
+      ;;
+    worker-report)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      cmd_worker_report "$@"
+      ;;
+    append)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      cmd_append "$@"
+      ;;
+    verify) cmd_verify "${1:-.okra}" ;;
+    status) cmd_status "${1:-.okra}" ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+main "$@"

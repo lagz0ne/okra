@@ -1,0 +1,45 @@
+{
+  "type": "flag_lifecycle_snapshot",
+  "flags": [
+    {
+      "type": "cannot",
+      "status": "resolved",
+      "opened_at": null,
+      "owner": "okra-orchestrator",
+      "severity": "branch-blocking",
+      "blocking_effect": "stops affected DKR or branch when discovery budget is exhausted or helper prevents OKRA work",
+      "current_evidence": "DKR worker returned learning checkpoint within budget; helper available",
+      "resolution": "no current cannot flag"
+    },
+    {
+      "type": "breaking",
+      "status": "resolved",
+      "opened_at": null,
+      "owner": "okra-orchestrator",
+      "severity": "committing-move-blocking",
+      "blocking_effect": "pauses committing moves on missing source read record, missing write record, store verification failure, or single-narrative acceptance",
+      "current_evidence": "required source content read records exist; final write and verify evidence are required before acceptance",
+      "resolution": "no current breaking flag"
+    },
+    {
+      "type": "pointless",
+      "status": "resolved",
+      "opened_at": null,
+      "owner": "okra-orchestrator",
+      "severity": "branch-blocking-after-lag",
+      "blocking_effect": "stops branches whose CKR moved but objective remains flat after lag window",
+      "current_evidence": "storage governance objective has no lag for fixture actions and current direct read is in band",
+      "resolution": "no current pointless flag"
+    },
+    {
+      "type": "authority_drift",
+      "status": "resolved",
+      "opened_at": null,
+      "owner": "human",
+      "severity": "governance-blocking",
+      "blocking_effect": "stops proposed moves outside approved paths or attempts to change frame/thresholds",
+      "current_evidence": "work confined to .okra/ and tasks/okra-governed-loop.md",
+      "resolution": "no current authority drift flag"
+    }
+  ]
+}

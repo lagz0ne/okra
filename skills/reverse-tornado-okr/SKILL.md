@@ -60,11 +60,21 @@ Decompose work into exactly three kinds. Keep them distinct; blurring them is wh
 - **DKR - Discovery.** Unmeasurable. A *scoped probe* at one unclear slice ("which channel
   converts?"). Its aim is to **maximize learning**. It is plural - many fire per level, some
   mid-execution. It has a **resource budget** (turns/time), because unmeasurable work has no natural
-  stopping point. It returns structure (one or many CKRs) or returns empty - empty is still useful.
+  stopping point. It returns structure (one or many CKRs) with probabilities/confidence, or returns
+  empty - empty is still useful. A DKR is complete only when it writes a **learning checkpoint**:
+  evidence collected, questions answered/unanswered, probability/confidence updates, candidate CKRs,
+  and the next unknowns. CKR/PKR entries stay candidate-only until the orchestrator accepts that
+  checkpoint.
 - **CKR - Contribution / Key Result.** Measurable, has its own metric. This is what counts toward
-  the objective.
+  the objective. A CKR is **context and measurement**, not a worker job. It tells the orchestrator
+  which contribution would matter and what direct metric proves it; it is not dispatched as work.
+  Each CKR still has a mini reverse-tornado context: what discovery would make the contribution
+  meaningful, what direct CKR metric proves movement, and what delivery path becomes PKR work only
+  after the uncertainty is reduced.
 - **PKR -> task - Progression.** Pure breakdown, then execution. A unit becomes a **task** when no
-  DKR remains under it: no discovery, no judgment, just do-and-check.
+  DKR remains under it: no discovery, no judgment, just do-and-check. PKRs report progress signals
+  for steering - off-track work, quality drift, churn, late discovery, stale metrics, and scope or
+  authority concerns.
 
 ## Step 2b - Two roles: orchestrator and workers
 
@@ -72,15 +82,23 @@ The loop runs as an **orchestrator** directing disposable **workers**. This spli
 it carries the authority lines. Each tier hands control *up* when it reaches the edge of its authority.
 
 **Orchestrator - the loop's brain.** Holds the frame read-only (objective, anti-goal, thresholds,
-metric contracts, and action envelope - all human-set). Decides the next move, runs the three-point
-anti-goal eval (especially admissibility, *before* dispatch), spawns and budgets workers, reads the
-direct metrics, raises the flags, and is the only part that talks to the human. The orchestrator
-steers within the cone. It never executes work itself and never edits the frame.
+metric contracts, and action envelope - all human-set). It owns the OKR board, governs check-ins,
+decides the next move, runs the three-point anti-goal eval (especially admissibility, *before*
+dispatch), spawns and budgets workers, reads the direct objective/CKR/anti-goal metrics, raises the
+flags, and is the only part that talks to the human. It also owns the **DKR learning gate**: no CKR
+or PKR is promoted onto the working board until a DKR worker has returned a learning checkpoint with
+evidence and probability/confidence updates. The orchestrator steers within the cone. It never
+executes work itself and never edits the frame. It also does **not** stop because a board, branch,
+PKR list, or worker queue is complete; it keeps checking, steering, and dispatching until the
+objective target is achieved, a human changes/stops the frame, or a blocking flag requires human
+resolution. Every serious artifact should state this loop-ownership rule explicitly.
 
-**Workers - the hands.** Scoped, disposable, parallelizable. Two kinds, matching the units:
+**Workers - the hands.** Scoped, disposable, parallelizable. Two kinds, matching the executable
+units. There is no CKR worker; CKR remains orchestrator-owned context.
 
 - **Discovery worker** runs a single scoped DKR probe - spends its turn budget, watches its own
-  learning, returns structure (CKRs) or returns empty.
+  learning, writes progress reports, and returns a learning checkpoint with evidence,
+  probability/confidence updates, candidate CKRs, or empty.
 - **Progression worker** executes one PKR/task - do-and-check, within its scope only.
 
 The cardinal worker rule: **a worker that hits an unknown mid-run does not improvise - it hands back
@@ -88,6 +106,11 @@ to the orchestrator**, which decides whether to spawn a discovery worker. A work
 at the edge of its scope. It cannot screen its own moves against the anti-goal (that is the
 orchestrator's admissibility job), cannot decide to call the human (it reports; the orchestrator
 decides if it is a flag), and cannot change scope.
+
+Workers must report progress in a durable place. For long runs, use an explicit run store such as
+`.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl`, written at each worker finish, when an
+unknown is hit, and on a timed heartbeat. Ten minutes is a good default heartbeat for live subagent
+work unless the human sets a different cadence.
 
 The authority gradient, made concrete:
 `human owns the frame -> orchestrator works inside it and makes the loop's calls -> workers execute
@@ -108,12 +131,27 @@ frame so the loop cannot rewrite it), the **tree**, per-move **results** (write-
 **append-only ledger** of direct metric and anti-goal readings (never overwritten, so guardrail
 history cannot be quietly rewritten greener), and raised **flags**.
 
+When a run produces many files, artifacts, check-ins, or progress summaries, add the integrity rule:
+**append-only records are the source of truth; status/progress files are generated views.** Store
+important content by hash, append check-ins and flags as records, and verify the store before resume
+or before reporting success. A stale or contradictory generated status is a signal, not evidence.
+When multiple OKRA loops may run in one workspace, keep `.okra/content/sha256` shared but put each
+loop's mutable state under `.okra/runs/<run-id>/`; do not let concurrent loops share one ledger,
+flag log, check-in log, worker directory, move-result directory, or generated status.
+In scored or delegated harness work, avoid ungoverned direct reads and writes: important content
+reads should be by content hash or recorded source check-in, and important writes should go through
+the store helper or record target path plus content hash. Also avoid **single LLM truth**: an
+agent's own final answer is not proof of progress, storage integrity, or governed read/write. Accept
+claims only when backed by deterministic evidence, store records, hashes, changed-path checks,
+human ratification, or independent review.
+
 A consequence worth knowing: the admissibility **dry-run** (propose-cost) worker has no side effect,
 so it is naturally idempotent and needs no key - which is why **dry-run is the default** for any move
 whose anti-goal cost cannot be known up front. Only the *committing* move is keyed and stored.
 
 For the full storage schema, key construction, and resume sequence, read
-`references/storage-idempotency.md`.
+`references/storage-idempotency.md`. For a lightweight file layout, generated-status rule, and bash
+helper, read `references/integrity-store.md`.
 
 ## Step 2d - Keep the run fresh (the ritual clock)
 
@@ -126,6 +164,11 @@ Then set the clock: start-of-turn freshness check, pre-dispatch admissibility, p
 read, end-of-turn status write, and an idle heartbeat when no worker finishes. Every round should
 write `current_round`, open flags, last metric read, and `next_check_at`. Do not dispatch committing
 work on stale metrics unless the human explicitly waives that stale state.
+
+For delegated subagent work, make check-ins both event-based and time-based: worker completion,
+unknown discovery, flag opening, and a default ten-minute heartbeat for long-running workers. Each
+check-in recollects DKR learning, reads file-based worker progress reports, updates CKR/PKR
+candidate status, and decides whether to continue, spawn discovery, pause, or escalate.
 
 For the operating-loop fields, lag handling, and flag lifecycle, read
 `references/operating-loop.md`.
@@ -241,6 +284,18 @@ When the user wants to run the goal over time, also deliver the Operating Loop: 
 round, metric freshness contracts, lag windows, `next_check_at`, stale-data policy, flag lifecycle,
 and what gets updated at every turn or timed heartbeat.
 
+For delegated loops, make these four lines explicit in the artifact:
+
+- The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the
+  objective metric reaches target or a human/blocking flag stops the loop.
+- DKRs are scoped discovery-worker probes with budgets and probability/confidence outputs.
+- CKR/PKR candidates are not promoted until the orchestrator accepts a DKR learning checkpoint.
+- CKRs are measurable contribution context with mini reverse-tornado discovery/delivery balance,
+  not subagent work.
+- PKRs are progression-worker execution units and must report progress signals at check-ins.
+- Long-running workers write file-based progress reports under `.okra/runs/<run-id>/workers/` and
+  use a timed heartbeat, defaulting to ten minutes when the human has not set a cadence.
+
 If the user wants a visual or shareable explainer, produce a self-contained HTML artifact. See
 `references/artifact-guide.md` for how (and how to keep the artifact within its own anti-goal:
 single file, no external runtime, no decoration that does not carry meaning).
@@ -251,5 +306,11 @@ single file, no external runtime, no decoration that does not carry meaning).
 - Rolling completed tasks up into "done" instead of reading the direct metric (cascade).
 - Treating the anti-goal as one end-of-loop check instead of three points.
 - Letting an execution task absorb a discovery instead of handing back.
+- Promoting CKRs or PKRs before a DKR learning checkpoint has produced evidence and probabilities.
 - Letting the loop redefine, retune, or switch the goal. That is always the human's call.
 - Running a recurring OKR loop without a freshness contract, heartbeat, lag window, and flag owner.
+- Running multiple OKRA loops against the same flat `.okra/ledger.jsonl`, `.okra/checkins.jsonl`,
+  or `.okra/workers/` path instead of giving each loop its own run store.
+- Treating a hand-edited progress summary as source of truth instead of generating it from
+  append-only storage records.
+- Treating one LLM's self-report as truth without independent evidence.

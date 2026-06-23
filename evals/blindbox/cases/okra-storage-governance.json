@@ -1,0 +1,29 @@
+{
+  "id": "okra-storage-governance",
+  "description": "A blindbox case where an agent must use the OKRA integrity store for governed reads, governed writes, check-ins, metric records, and independent acceptance evidence.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "okra-storage-governance",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-governed-loop.md. This case is about governed content use, so important fixture/source reads and the final artifact write must be represented in `.okra` records. The task artifact must still be a full OKRA loop: DKR-first before CKR/PKR, probability or confidence outputs from DKR, a DKR learning checkpoint accepted by the orchestrator before CKR/PKR candidates are promoted, clear DKR-to-CKR-to-PKR traceability, each CKR with a mini reverse-tornado discovery/delivery balance as orchestrator-owned context, no-cascade direct metric reads, metric freshness and lag rules, check-in cadence, PKR progress signals, and all four flags (`cannot`, `breaking`, `pointless`, `authority_drift`) with lifecycle. Make the loop ownership explicit: the orchestrator owns objective checks, check-ins, the OKR board, and subagent steering; it does not stop because PKRs or board items are complete; DKR and PKR are subagent work; CKR is measurable context, not a subagent task. Initialize `.okra` with the skill helper. Store and read README.md and inputs/current-signals.md through `.okra/content/sha256` using helper `put` plus `read-content` before using their contents. Build the final artifact as a draft under `.okra/drafts/`, then write the final `tasks/okra-governed-loop.md` through helper `write-content`. Append at least one DKR worker progress report with helper `worker-report` under `.okra/workers/<worker-id>/progress.jsonl`; the report must include learning collected, probability/confidence update, next unknowns, and next_report_at using a ten-minute heartbeat for long-running subagents. Append ledger records for the objective and all three anti-goals. Append at least one check-in record with type `steering_checkin`, worker_progress_refs, PKR signals, and a steering decision. Append an acceptance-evidence check-in record with type `acceptance_evidence_checkin`, `single_llm_truth_acceptance_count: 0`, and evidence entries for store verification, content hashes, worker progress files, and changed-path or deterministic-checker evidence. Generate `.okra/status.md` with helper `status`, verify the store with helper `verify`, and include the evidence summary in the task artifact. Do not implement product code or create anything outside `.okra/` and `tasks/okra-governed-loop.md`.",
+  "allowed_paths": [
+    ".okra/",
+    "tasks/okra-governed-loop.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/okra-governed-loop.md"
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/okra-governed-loop.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/okra-governed-loop.md"
+    },
+    {
+      "type": "okra_store_governance",
+      "path": ".okra"
+    }
+  ]
+}

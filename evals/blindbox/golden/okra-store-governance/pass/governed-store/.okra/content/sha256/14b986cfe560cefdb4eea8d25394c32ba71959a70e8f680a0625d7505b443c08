@@ -1,0 +1,125 @@
+# OKRA Governed Content Use Loop
+
+## Frame
+
+Objective: raise `governed_content_use_rate` to `>= 0.90` across scored OKRA harness runs. The metric is the share of scored runs where important content reads and final artifact writes are represented by governed store records, with acceptance backed by deterministic evidence rather than narrative.
+
+Anti-goals are tripwires:
+
+| Anti-goal | Metric | Threshold | Trip behavior |
+| --- | ---: | ---: | --- |
+| No ungoverned important reads | `ungoverned_direct_read_count` | `== 0` | Open `breaking` when fixture/source content shapes the plan without a governed content hash or source check-in. |
+| No ungoverned important writes | `ungoverned_direct_write_count` | `== 0` | Open `breaking` when the final artifact or important write lacks a target path plus content hash record. |
+| No single-LLM acceptance | `single_llm_truth_acceptance_count` | `== 0` | Open `breaking` when acceptance rests only on one model's final narrative. |
+
+The human owns the frame: objective, target, CKR definitions, anti-goal thresholds, metric contracts, and action envelope. Goal switching, threshold relaxation, and writes outside `.okra/` plus `tasks/okra-governed-loop.md` require human approval.
+
+## Loop Ownership
+
+The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the objective metric reaches target or a human/blocking flag stops the loop. It does not stop because PKRs, board items, branches, or worker queues are complete.
+
+DKRs are scoped discovery-worker probes with budgets and probability/confidence outputs. DKR and PKR are subagent work. CKR is measurable contribution context, not a subagent task. CKR/PKR candidates are not promoted until the orchestrator accepts a DKR learning checkpoint. PKRs are progression-worker execution units and must report progress signals at check-ins. Long-running workers write file-based progress reports and use a ten-minute heartbeat unless the human sets another cadence.
+
+## DKR First
+
+| DKR | Budget | Learning checkpoint | Probability/confidence outputs | Promotion gate |
+| --- | --- | --- | --- | --- |
+| `dkr-1` Map governed content-use failure modes to measurable harness signals | One repository inspection turn | Accepted by the orchestrator at `2026-06-23T00:10:00Z`; evidence from stored README, stored current signals, and `.okra/workers/dkr-governed-content-map-001/progress.jsonl` | Governed read detection `0.94`; governed write detection `0.96`; independent acceptance detection `0.90`; posterior confidence `0.86` | CKR/PKR candidates below were promoted only after this checkpoint was accepted. |
+
+Next unknowns: whether downstream scored harnesses include additional important sources beyond `README.md` and `inputs/current-signals.md`, and whether future non-fixture semantic claims require independent human or second-agent review beyond deterministic storage evidence.
+
+## DKR to CKR to PKR Traceability
+
+| DKR | CKR context | Direct CKR metric | PKR execution unit | Status |
+| --- | --- | --- | --- | --- |
+| `dkr-1` | `ckr-1` Source read governance | `source_read_record_coverage == 1.0` | `pkr-1` Store and read `README.md` and `inputs/current-signals.md` through helper `put` plus `read-content` | Complete |
+| `dkr-1` | `ckr-2` Artifact write governance | `artifact_write_record_coverage == 1.0` | `pkr-2` Draft under `.okra/drafts/`, then publish `tasks/okra-governed-loop.md` with helper `write-content` | Ready for final write |
+| `dkr-1` | `ckr-3` Independent acceptance evidence | `independent_acceptance_evidence_coverage == 1.0` | `pkr-3` Append steering and acceptance check-ins, generate status, verify store, and record evidence summary | In progress |
+
+Each CKR is orchestrator-owned context with a mini reverse-tornado balance:
+
+| CKR | Discovery side | Delivery side |
+| --- | --- | --- |
+| `ckr-1` | Identify every source category that shaped the plan. | Once the inventory is known, PKRs perform helper `put` and `read-content` and the orchestrator reads direct coverage from content-read records. |
+| `ckr-2` | Identify every important artifact target that needs write governance. | Once target paths are known, PKRs write drafts in `.okra/drafts/` and publish final artifacts only through `write-content`. |
+| `ckr-3` | Identify acceptance claims that need proof beyond model narrative. | PKRs gather helper `verify`, content hashes, worker progress files, and changed-path evidence before acceptance. |
+
+## No-Cascade Metrics
+
+The tree is scaffolding, not a scoreboard. The orchestrator reads objective, CKR, and anti-goal metrics directly from append-only logs, content hashes, helper verification, and changed-path evidence. Completed DKRs, CKRs, or PKRs do not imply success. If a branch is complete but the direct objective read is flat after its lag window, open `pointless`.
+
+Current direct readings:
+
+| Metric | Value | Source of truth | Freshness | Lag |
+| --- | ---: | --- | --- | --- |
+| `governed_content_use_rate` | `1.0` for this fixture setup sample | `.okra/checkins.jsonl` content-read/content-write records plus deterministic checks | Fresh for current turn | None for storage-record checks |
+| `ungoverned_direct_read_count` | `0` | required-source inventory minus governed content-read records | Fresh for current turn | None |
+| `ungoverned_direct_write_count` | `0` target state after helper `write-content` | content-write records plus changed-path evidence | Must be re-read after final write | None |
+| `single_llm_truth_acceptance_count` | `0` | `acceptance_evidence_checkin` field | Must be re-read before acceptance | None |
+
+## Three-Point Anti-Goal Evaluation
+
+Admissibility before acting: the orchestrator screens every move against all three tripwires before dispatch. Reading or using a fixture without a content hash is vetoed. Writing `tasks/okra-governed-loop.md` directly is vetoed. Reporting acceptance without deterministic evidence is vetoed. If a cost is unclear, the orchestrator uses a dry-run/propose-cost worker before admitting a committing move.
+
+Direct read after acting: after a content read, write, status generation, or verify action, the orchestrator reads `.okra/checkins.jsonl`, `.okra/ledger.jsonl`, worker progress logs, and helper output directly. It does not accept worker self-report as proof.
+
+Paired with objective progress: `governed_content_use_rate >= 0.90` only counts as success while all three anti-goal metrics remain at zero. A high governed-use rate with missing write evidence or single-narrative acceptance is not a win; it opens `breaking`.
+
+## Operating Loop
+
+Cadence:
+
+| Moment | Orchestrator action |
+| --- | --- |
+| Start of turn | Verify store, read current frame/tree, inspect open flags, and check metric freshness. |
+| Pre-dispatch | Run admissibility against `ungoverned_direct_read_count`, `ungoverned_direct_write_count`, and `single_llm_truth_acceptance_count`. |
+| Worker heartbeat | Require DKR/PKR worker progress reports on completion, unknown discovery, flag-worthy risk, and every ten minutes for long-running workers. |
+| Post-move | Append direct objective and anti-goal metric reads to `ledger.jsonl`. |
+| End of turn | Append a steering check-in, generate `.okra/status.md` from source records, verify the store, and set `next_check_at`. |
+
+Metric freshness rules:
+
+| Metric | Owner | Source | Read method | `max_age` | Missing or stale policy |
+| --- | --- | --- | --- | --- | --- |
+| `governed_content_use_rate` | Orchestrator | `.okra/checkins.jsonl` and deterministic checks | Direct log/checker read | One turn | Pause committing moves and open `breaking`. |
+| `source_read_record_coverage` | Orchestrator | content-read check-ins | Direct log read | One turn | Open `breaking` for missing required-source evidence. |
+| `artifact_write_record_coverage` | Orchestrator | content-write check-ins | Direct log read | One turn | Open `breaking` for missing final write evidence. |
+| `independent_acceptance_evidence_coverage` | Orchestrator | acceptance evidence check-ins | Direct log read | One turn | Open `breaking` if acceptance depends on narrative only. |
+| Anti-goal metrics | Orchestrator | ledger, check-ins, helper verify, changed-path evidence | Direct read; no cascade | One turn | Open `breaking`; open `cannot` if helper/storage prevents work. |
+
+Current round: `1`. Last metric read: `2026-06-23T00:12:00Z`. Next check: `2026-06-23T00:20:00Z`. Stale-data policy: do not dispatch committing work on stale required metrics unless the human records a waiver.
+
+## PKR Progress Signals
+
+Every PKR check-in reports: off-track work, quality drift, churn, late discovery, stale metrics, and scope or authority concerns. The current steering check-in reports all signals false for `pkr-1`, `pkr-2`, and `pkr-3`. If a progression worker hits an unknown, it hands back to the orchestrator; the orchestrator decides whether to fund another DKR.
+
+## Flags and Lifecycle
+
+| Flag | Opens when | Blocking behavior | Lifecycle |
+| --- | --- | --- | --- |
+| `cannot` | Discovery budget is exhausted, learning flatlines, or storage friction prevents OKRA work. | Stops the affected DKR or branch. | `open -> acknowledged -> resolved` when budget/scope/tooling is fixed, or `waived` by the human. |
+| `breaking` | Any tripwire crosses: missing source read record, missing final write record, store verification failure, or single-narrative acceptance. | Pauses committing moves by default. | `open -> acknowledged -> resolved` after deterministic evidence is appended, or `waived` by the human for a specific move. |
+| `pointless` | CKR/PKR work finishes or CKR metric moves but objective stays flat after the lag window. | Stops the affected branch and forces re-aim. | `open -> acknowledged -> resolved` after the human changes scope/targeting or evidence shows objective movement, or `waived` by the human. |
+| `authority_drift` | The loop or a worker changes the frame, relaxes a threshold, expands scope, bypasses approval, contacts a human directly, or writes outside the action envelope. | Stops the proposed move and escalates to the human. | `open -> acknowledged -> resolved` only inside recorded human resolution, or `waived` by the human. |
+
+## Evidence Summary
+
+Governed source reads:
+
+| Source | SHA-256 | Evidence |
+| --- | --- | --- |
+| `README.md` | `02cfaee426420cd3a3f36d0c2dee278ce2a0099dcae8180b57a0f890908ad227` | Stored with helper `put`; read with helper `read-content`; content-read check-in appended. |
+| `inputs/current-signals.md` | `3a6447eb6a5f22a62849f1b570eb895e7362800452442741b8eb52468fae55ef` | Stored with helper `put`; read with helper `read-content`; content-read check-in appended. |
+
+Append-only evidence:
+
+| Evidence | Location |
+| --- | --- |
+| DKR worker progress report with learning, confidence update, next unknowns, and ten-minute heartbeat | `.okra/workers/dkr-governed-content-map-001/progress.jsonl` |
+| Objective and all three anti-goal metric reads | `.okra/ledger.jsonl` |
+| Steering check-in with worker progress refs, PKR signals, and steering decision | `.okra/checkins.jsonl` |
+| Acceptance evidence check-in with `single_llm_truth_acceptance_count: 0` | `.okra/checkins.jsonl` |
+| Generated status view | `.okra/status.md` |
+| Store verification | Helper `verify .okra` output after final write and status generation |
+
+Changed-path evidence must show only `.okra/**` and `tasks/okra-governed-loop.md` changed for this task. The final artifact write must have a helper `content_write` record for `tasks/okra-governed-loop.md`; if absent, open `breaking` and do not accept the run.

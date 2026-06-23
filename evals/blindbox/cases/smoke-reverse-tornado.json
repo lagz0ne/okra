@@ -3,8 +3,9 @@
   "description": "A minimal blindbox case that checks whether an agent can use the skill to produce a Reverse Tornado loop from a sparse repo.",
   "skill": "reverse-tornado-okr",
   "fixture": "simple-repo",
-  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/reverse-tornado-loop.md. Keep the loop grounded in the files present in the repo. Do not implement product code.",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/reverse-tornado-loop.md. Keep the loop grounded in the files present in the repo. Treat it as a delegated loop: DKR learning checkpoints must come before CKR/PKR promotion, CKR remains measurable context, DKR and PKR are worker scopes, and long-running workers use ten-minute heartbeat check-ins with file-based progress reports under `.okra/workers/<worker-id>/progress.jsonl`. Do not implement product code or create anything outside `.okra/` and `tasks/reverse-tornado-loop.md`.",
   "allowed_paths": [
+    ".okra/",
     "tasks/reverse-tornado-loop.md"
   ],
   "checks": [
@@ -14,6 +15,10 @@
     },
     {
       "type": "reverse_tornado_loop",
+      "path": "tasks/reverse-tornado-loop.md"
+    },
+    {
+      "type": "okra_hard_gates",
       "path": "tasks/reverse-tornado-loop.md"
     }
   ]

@@ -1,0 +1,46 @@
+{
+  "type": "dkr_worker_progress",
+  "worker_id": "dkr-governed-content-map-001",
+  "worker_kind": "discovery",
+  "dkr_id": "dkr-1",
+  "reported_at": "2026-06-23T00:10:00Z",
+  "learning_collected": [
+    "README requires governed content reads, governed writes, append-only check-ins, direct metric records, generated status, and independent acceptance evidence.",
+    "Current signals identify four failures: unrecorded source reads, direct task writes, hand-edited generated status, and verification by narrative only.",
+    "The loop should remain bash-first; no database, service, daemon, or product code is needed."
+  ],
+  "probability_confidence_update": {
+    "prior_confidence": 0.55,
+    "posterior_confidence": 0.86,
+    "updates": [
+      {
+        "claim": "Source-read governance can be measured directly from content_read check-ins.",
+        "probability": 0.94
+      },
+      {
+        "claim": "Final artifact write governance can be measured directly from content_write check-ins.",
+        "probability": 0.96
+      },
+      {
+        "claim": "Acceptance can avoid single LLM truth by requiring helper verify, content hashes, worker logs, and changed-path evidence.",
+        "probability": 0.9
+      }
+    ]
+  },
+  "candidate_ckrs": [
+    "source_read_record_coverage",
+    "artifact_write_record_coverage",
+    "independent_acceptance_evidence_coverage"
+  ],
+  "candidate_pkrs": [
+    "store and read required sources through helper",
+    "draft under .okra/drafts and publish through write-content",
+    "append steering and acceptance evidence check-ins, generate status, verify store"
+  ],
+  "next_unknowns": [
+    "Whether downstream scored harnesses count only README.md and inputs/current-signals.md or additional fixtures as important sources.",
+    "Whether an independent semantic reviewer is required beyond deterministic storage evidence for future non-fixture runs."
+  ],
+  "next_report_at": "2026-06-23T00:20:00Z",
+  "heartbeat": "PT10M"
+}

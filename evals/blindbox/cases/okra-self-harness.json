@@ -1,0 +1,24 @@
+{
+  "id": "okra-self-harness",
+  "description": "A blindbox case where an agent must use OKRA to design the OKRA eval harness without rushing to PKR implementation.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "okra-self-harness",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-self-harness.md. Treat the requested harness as a delegated OKRA loop design, not as implementation work. The artifact must make DKR-first reasoning explicit before CKR and PKR, include probability-weighted discovery outputs, and define the DKR learning checkpoint that must be accepted by the orchestrator before CKR/PKR candidates are promoted onto the working board. Define hard gates for the anti-patterns in the repository, show how each CKR has a mini reverse-tornado discovery/delivery balance as orchestrator-owned context, and define check-in cadence plus PKR progress signals for timely steering. Make the loop ownership explicit: the orchestrator owns objective checks, check-ins, the OKR board, and subagent steering; it does not stop because PKRs or board items are complete; DKR and PKR are subagent work; CKR is measurable context, not a subagent task. For long-running subagents, specify a ten-minute timed heartbeat and file-based worker progress reports under `.okra/workers/<worker-id>/progress.jsonl`. Do not implement checker code or create anything outside the requested task artifact.",
+  "allowed_paths": [
+    "tasks/okra-self-harness.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/okra-self-harness.md"
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/okra-self-harness.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/okra-self-harness.md"
+    }
+  ]
+}

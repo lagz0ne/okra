@@ -13,6 +13,7 @@ The team wants an OKR loop for onboarding growth:
 
 Metric source notes:
 
+- For this eval, treat the current run time as `2026-06-23T00:00:00Z` for freshness decisions.
 - Activation dashboard: `warehouse.saved_query.activation_weekly_v3`.
 - Refund/cancellation dashboard: `warehouse.saved_query.refund_cancel_weekly_v2`.
 - Last copied metric reading in this repo was recorded on 2026-06-22, but the dashboard value is

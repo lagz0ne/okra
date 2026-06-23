@@ -1,0 +1,1 @@
+{"payload":{"type":"pkr_worker_progress","worker_scope":"PKR progression","status":"running","pkr_signals":{"off_track":false,"quality_drift":false,"late_discovery":false,"stale_metric":false},"next_report_at":"+10m"}}

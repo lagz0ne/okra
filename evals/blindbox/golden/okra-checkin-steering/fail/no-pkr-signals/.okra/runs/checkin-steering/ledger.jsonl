@@ -1,0 +1,2 @@
+{"payload":{"type":"metric_read","metric":"healthy_checkin_rate","value":0.91,"target":0.9}}
+{"payload":{"type":"anti_goal_read","metric":"dkr_budget_overrun_count","value":0,"threshold":0}}

@@ -1,0 +1,20 @@
+{
+  "type": "metric_read",
+  "metric_kind": "objective",
+  "metric_id": "obj-governed-content-use",
+  "metric": "governed_content_use_rate",
+  "value": 1.0,
+  "unit": "ratio",
+  "target": 0.9,
+  "comparator": ">=",
+  "observed_at": "2026-06-23T00:12:00Z",
+  "source": ".okra/checkins.jsonl direct content_read/content_write records for this fixture setup",
+  "read_method": "direct log inspection; no cascade from task completion",
+  "window": "current repository fixture run",
+  "freshness_status": "fresh",
+  "lag_window": "none for storage-record checks",
+  "evidence": {
+    "source_content_sha256": "02cfaee426420cd3a3f36d0c2dee278ce2a0099dcae8180b57a0f890908ad227",
+    "related_content_sha256": "3a6447eb6a5f22a62849f1b570eb895e7362800452442741b8eb52468fae55ef"
+  }
+}

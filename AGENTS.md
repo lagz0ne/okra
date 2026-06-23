@@ -26,11 +26,21 @@ Use the dry-run to inspect prompt packets and bwrap commands before spending mod
 
 ## Real Eval
 
-Run a real smoke eval when credentials and model access are available:
+Run real isolated evals when credentials and model access are available. The default scored path
+runs every blindbox case, including storage governance and check-in steering:
+
+```sh
+scripts/run-blindbox.sh --agent both
+```
+
+For a narrower smoke pass while iterating, run the core text cases plus the two stateful harness
+cases explicitly:
 
 ```sh
 scripts/run-blindbox.sh --agent both --case smoke-reverse-tornado
 scripts/run-blindbox.sh --agent both --case real-life-operations
+scripts/run-blindbox.sh --agent both --case okra-storage-governance
+scripts/run-blindbox.sh --agent both --case okra-checkin-steering
 ```
 
 The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace and run directory as writable, selected system/tool paths as read-only, and per-run writable agent homes. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
@@ -40,7 +50,9 @@ PATH, and locale variables it needs. Agent auth files are still mounted read-onl
 model access, so scored runs should use trusted fixtures/prompts or eval-scoped credentials. Results
 record input hashes, CLI version, allowed-path checks, and checker timeouts.
 
-Do not use `--isolation none` for scored runs. The runner refuses it unless `--allow-unisolated` is passed because unisolated workspaces can read the repo-local eval cases and checkers.
+Do not use `--isolation none` for scored runs. The runner refuses it unless `--allow-unisolated`
+is passed because unisolated workspaces can read the repo-local eval cases and checkers, and this
+path does not mount host agent auth files. Treat it as a structure-only debugging mode.
 
 ## Review
 

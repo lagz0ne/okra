@@ -1,0 +1,1 @@
+{"payload":{"type":"dkr_worker_progress","worker_scope":"DKR discovery","budget":{"turn_budget":4,"spent_turns":6,"remaining_turns":0,"stop_rule":"open cannot when exhausted"},"learning_collected":["late learning"],"evidence":["extra probes"],"confidence_update":{"prior":0.4,"posterior":0.5},"next_unknowns":["still unknown"],"next_report_at":"+10m"}}

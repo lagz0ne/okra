@@ -1,0 +1,63 @@
+{
+  "type": "acceptance_evidence_checkin",
+  "round": 1,
+  "single_llm_truth_acceptance_count": 0,
+  "evidence": [
+    {
+      "kind": "store_verification",
+      "status": "verified",
+      "detail": "helper verify reported: OKRA store verified: .okra"
+    },
+    {
+      "kind": "content_hashes",
+      "status": "present",
+      "entries": [
+        {
+          "path": "README.md",
+          "content_sha256": "02cfaee426420cd3a3f36d0c2dee278ce2a0099dcae8180b57a0f890908ad227"
+        },
+        {
+          "path": "inputs/current-signals.md",
+          "content_sha256": "3a6447eb6a5f22a62849f1b570eb895e7362800452442741b8eb52468fae55ef"
+        },
+        {
+          "path": ".codex/skills/reverse-tornado-okr/SKILL.md",
+          "content_sha256": "adeb32a4ed947641142042f5185f270db2a652aad6efdb3f5a54ae6d50b8327b"
+        },
+        {
+          "path": ".codex/skills/reverse-tornado-okr/references/integrity-store.md",
+          "content_sha256": "e0568807d8ec8a73cde869bef3b8d8eb2b8f9e8666a3d576dbd426d856ccf3d7"
+        },
+        {
+          "path": ".codex/skills/reverse-tornado-okr/references/storage-idempotency.md",
+          "content_sha256": "7569cc3f6ae5c63556abc2a800b89e2b10425fa07b219854e853d40209ee1858"
+        },
+        {
+          "path": ".codex/skills/reverse-tornado-okr/references/operating-loop.md",
+          "content_sha256": "6359fe369a1d77a37093ba49dbce66d5be228835d9c10cc4b47ddff9cf5bcd61"
+        },
+        {
+          "path": ".codex/skills/reverse-tornado-okr/scripts/okra-store.sh",
+          "content_sha256": "ed22c8afe29b3448ad2cd314773d3e97bed27864c149c5400b6786bf68ae00c9"
+        },
+        {
+          "path": "tasks/okra-governed-loop.md",
+          "content_sha256": "044e592016185383cba61bf48bbbf70f398047451dcb18b30e626aed5d695540"
+        }
+      ]
+    },
+    {
+      "kind": "worker_progress_files",
+      "status": "present",
+      "entries": [
+        ".okra/workers/dkr-governed-content-map-001/progress.jsonl"
+      ]
+    },
+    {
+      "kind": "changed_path_or_deterministic_checker",
+      "status": "present",
+      "detail": "git status --short showed only untracked .okra/ and tasks/; deterministic checker is helper verify"
+    }
+  ],
+  "steering_decision": "accept storage-governed artifact evidence; keep loop running until objective target is achieved across scored harness runs or a human/blocking flag stops it"
+}

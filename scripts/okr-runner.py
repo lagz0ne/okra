@@ -26,7 +26,9 @@ RUN_ROOT = REPO_ROOT / ".runs"
 BWRAP_WORKSPACE = "/tmp/workspace"
 BWRAP_RUNS = "/tmp/runs"
 CHECKERS_DIR = REPO_ROOT / "evals" / "blindbox" / "checks"
+GOLDEN_DIR = REPO_ROOT / "evals" / "blindbox" / "golden"
 CHECK_TIMEOUT = 60
+MAX_SECRET_SCAN_BYTES = 5 * 1024 * 1024
 QUICK_VALIDATE = (
     Path.home()
     / ".codex"
@@ -36,6 +38,21 @@ QUICK_VALIDATE = (
     / "scripts"
     / "quick_validate.py"
 )
+
+SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
+    ("openai_key", re.compile(rb"\bsk-proj-[A-Za-z0-9_-]{20,}\b")),
+    ("anthropic_key", re.compile(rb"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("github_token", re.compile(rb"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
+    ("slack_token", re.compile(rb"\bxox[aboprs]-[A-Za-z0-9-]{20,}\b")),
+    ("bearer_token", re.compile(rb"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._-]{30,}")),
+    (
+        "credential_field",
+        re.compile(
+            rb'(?i)"(?:access|refresh|session|id|api|auth)[_-]?(?:token|secret|key)"\s*:\s*"[^"\s]{20,}"'
+        ),
+    ),
+)
+STRUCTURED_CREDENTIAL_EXTS = {".json", ".toml", ".yaml", ".yml", ".env", ".ini", ".conf", ".config", ".properties"}
 
 
 class RunnerError(RuntimeError):
@@ -90,16 +107,27 @@ def sha256_text(value: str) -> str:
 
 def sha256_path(path: Path) -> str:
     digest = hashlib.sha256()
+    if path.is_symlink():
+        digest.update(b"symlink\0")
+        digest.update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
+        return digest.hexdigest()
     if path.is_file():
         digest.update(path.read_bytes())
         return digest.hexdigest()
     for child in sorted(path.rglob("*")):
-        if not child.is_file() or "__pycache__" in child.parts:
+        if "__pycache__" in child.parts:
             continue
         rel = child.relative_to(path).as_posix()
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
-        digest.update(child.read_bytes())
+        if child.is_symlink():
+            digest.update(b"symlink\0")
+            digest.update(os.readlink(child).encode("utf-8", errors="surrogateescape"))
+        elif child.is_file():
+            digest.update(b"file\0")
+            digest.update(child.read_bytes())
+        else:
+            continue
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -189,7 +217,15 @@ def load_cases(selected: list[str] | None) -> list[dict[str, Any]]:
 
 def validate_cases() -> list[str]:
     errors: list[str] = []
-    allowed_checks = {"file_exists", "file_contains", "reverse_tornado_loop"}
+    allowed_checks = {
+        "file_exists",
+        "file_contains",
+        "reverse_tornado_loop",
+        "okra_hard_gates",
+        "okra_store_governance",
+        "okra_checkin_steering",
+        "operations_stale_metrics",
+    }
     for case in load_cases(None):
         path = case["_path"]
         for key in ("id", "description", "skill", "fixture", "prompt", "checks"):
@@ -199,10 +235,16 @@ def validate_cases() -> list[str]:
             errors.append(f"{path}: missing skill {case['skill']}")
         if "fixture" in case and not (FIXTURES_DIR / case["fixture"]).exists():
             errors.append(f"{path}: missing fixture {case['fixture']}")
-        allowed_paths = case.get("allowed_paths", [])
-        if allowed_paths and not isinstance(allowed_paths, list):
+        if "allowed_paths" not in case:
+            errors.append(f"{path}: missing allowed_paths")
+            allowed_paths = []
+        else:
+            allowed_paths = case.get("allowed_paths")
+        if not isinstance(allowed_paths, list):
             errors.append(f"{path}: allowed_paths must be a list")
-        elif isinstance(allowed_paths, list):
+        elif not allowed_paths:
+            errors.append(f"{path}: allowed_paths must not be empty")
+        else:
             for index, allowed_path in enumerate(allowed_paths):
                 error = validate_relative_path(allowed_path, label=f"{path}: allowed_paths {index}")
                 if error:
@@ -288,6 +330,29 @@ def cmd_validate(args: argparse.Namespace) -> int:
     for script in sorted(CHECKERS_DIR.glob("*.py")):
         failures += run_checked(
             [sys.executable, "-m", "py_compile", str(script)],
+            dry_run=args.dry_run,
+        )
+
+    calibrated_checkers = [
+        ("reverse_tornado_loop.py", "reverse-tornado-loop"),
+        ("okra_hard_gates.py", "okra-hard-gates"),
+        ("operations_stale_metrics.py", "operations-stale-metrics"),
+        ("okra_store_governance.py", "okra-store-governance"),
+        ("okra_checkin_steering.py", "okra-checkin-steering"),
+    ]
+    for checker_name, golden_name in calibrated_checkers:
+        checker = CHECKERS_DIR / checker_name
+        golden = GOLDEN_DIR / golden_name
+        if not checker.exists():
+            print(f"missing calibrated checker: {checker}", file=sys.stderr)
+            failures += 1
+            continue
+        if not golden.exists():
+            print(f"missing golden calibration corpus: {golden}", file=sys.stderr)
+            failures += 1
+            continue
+        failures += run_checked(
+            [sys.executable, str(checker), "--calibrate", str(golden)],
             dry_run=args.dry_run,
         )
 
@@ -607,9 +672,23 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
     return cmd
 
 
-def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
+def model_env_name(agent: str) -> str:
     if agent == "codex":
-        return [
+        return "CODEX_MODEL"
+    if agent == "claude":
+        return "ANTHROPIC_MODEL"
+    return f"{agent.upper()}_MODEL"
+
+
+def requested_model(agent: str) -> str | None:
+    value = os.environ.get(model_env_name(agent))
+    return value.strip() if value and value.strip() else None
+
+
+def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
+    model = requested_model(agent)
+    if agent == "codex":
+        cmd = [
             "env",
             f"HOME={runs_root}/home",
             f"CODEX_HOME={runs_root}/codex-home",
@@ -623,12 +702,13 @@ def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
             "--skip-git-repo-check",
             "--cd",
             workspace_root,
-            "-o",
-            f"{runs_root}/artifacts/final.md",
-            "-",
         ]
+        if model:
+            cmd += ["--model", model]
+        cmd += ["-o", f"{runs_root}/artifacts/final.md", "-"]
+        return cmd
     if agent == "claude":
-        return [
+        cmd = [
             "env",
             f"HOME={runs_root}/home",
             f"XDG_CACHE_HOME={runs_root}/cache",
@@ -640,6 +720,9 @@ def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
             "--output-format",
             "text",
         ]
+        if model:
+            cmd += ["--model", model]
+        return cmd
     raise RunnerError(f"unknown agent: {agent}")
 
 
@@ -739,6 +822,121 @@ def evaluate_allowed_paths(workspace: Path, allowed_paths: list[str]) -> dict[st
     }
 
 
+def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
+    findings: list[str] = []
+    placeholder_paths = {
+        Path("codex-home/auth.json"),
+        Path("home/.claude/.credentials.json"),
+    }
+    for path in sorted(run_dir.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(run_dir)
+        if rel in placeholder_paths:
+            findings.append(f"{rel}: auth placeholder still preserved")
+            continue
+        try:
+            with path.open("rb") as handle:
+                data = handle.read(MAX_SECRET_SCAN_BYTES)
+        except OSError as exc:
+            findings.append(f"{rel}: unreadable during credential audit: {exc}")
+            continue
+        for name, pattern in SECRET_PATTERNS:
+            if (
+                name == "credential_field"
+                and path.suffix.lower() not in STRUCTURED_CREDENTIAL_EXTS
+                and path.name not in {".env"}
+            ):
+                continue
+            if pattern.search(data):
+                findings.append(f"{rel}: matched {name}")
+                break
+
+    if findings:
+        detail = "potential credential material preserved: " + ", ".join(findings[:10])
+        if len(findings) > 10:
+            detail += f" (+{len(findings) - 10} more)"
+    else:
+        detail = "no known credential patterns found in preserved artifacts"
+    return {
+        "type": "credential_artifact_audit",
+        "path": str(run_dir),
+        "passed": not findings,
+        "detail": detail,
+        "findings": findings,
+    }
+
+
+def classify_agent_exit(agent: str, run_dir: Path, code: int) -> str:
+    if code == 0:
+        return "agent command exited 0"
+    if code == 124:
+        return "agent command timed out"
+
+    artifacts = run_dir / "artifacts"
+    snippets: list[str] = []
+    for name in ("final.md", "agent.log"):
+        path = artifacts / name
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if text.strip():
+            snippets.append(text[:4000])
+    combined = "\n".join(snippets)
+    if re.search(r"(?i)(failed to authenticate|invalid authentication credentials|api error:\s*401|401)", combined):
+        return f"{agent} exited {code}: authentication failure"
+    if re.search(r"(?i)(rate limit|too many requests|429)", combined):
+        return f"{agent} exited {code}: rate limit"
+    if re.search(r"(?i)(timeout|timed out)", combined):
+        return f"{agent} exited {code}: timeout"
+    if re.search(r"(?i)(permission denied|not allowed|unauthorized)", combined):
+        return f"{agent} exited {code}: permission or authorization failure"
+    return f"{agent} exited {code}"
+
+
+def evaluate_agent_execution(agent: str, run_dir: Path, code: int) -> dict[str, Any]:
+    return {
+        "type": "agent_execution",
+        "path": str(run_dir / "artifacts"),
+        "passed": code == 0,
+        "detail": classify_agent_exit(agent, run_dir, code),
+        "exit_code": code,
+    }
+
+
+def changed_path_hashes(workspace: Path) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    for rel in git_changed_paths(workspace):
+        path = workspace / rel
+        if path.exists():
+            hashes[rel] = sha256_path(path)
+        else:
+            hashes[rel] = "deleted"
+    return hashes
+
+
+def output_hashes(run_dir: Path, workspace: Path) -> dict[str, Any]:
+    artifacts = run_dir / "artifacts"
+    artifact_files: dict[str, str] = {}
+    if artifacts.exists():
+        for path in sorted(child for child in artifacts.rglob("*") if child.is_file()):
+            artifact_files[path.relative_to(run_dir).as_posix()] = sha256_path(path)
+    return {
+        "run_tree_sha256_before_result": sha256_path(run_dir),
+        "artifacts_tree_sha256": sha256_path(artifacts) if artifacts.exists() else "missing",
+        "workspace_tree_sha256": sha256_path(workspace),
+        "changed_paths_sha256": changed_path_hashes(workspace),
+        "artifact_files_sha256": artifact_files,
+    }
+
+
+def write_result(run_dir: Path, result: dict[str, Any]) -> None:
+    result_path = run_dir / "result.json"
+    result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    digest = sha256_path(result_path)
+    (run_dir / "result.sha256").write_text(f"{digest}  result.json\n", encoding="utf-8")
+
+
 def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_timeout: int = CHECK_TIMEOUT) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for check in checks:
@@ -781,6 +979,86 @@ def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_time
                     detail = proc.stdout.strip()
                 except subprocess.TimeoutExpired:
                     detail = f"checker timeout after {check_timeout} seconds"
+        elif check.get("type") == "okra_hard_gates":
+            script = CHECKERS_DIR / "okra_hard_gates.py"
+            if not path.exists():
+                detail = "missing file"
+            elif not script.exists():
+                detail = f"missing checker: {script}"
+            else:
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, str(script), str(path)],
+                        cwd=workspace,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        timeout=check_timeout,
+                    )
+                    passed = proc.returncode == 0
+                    detail = proc.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    detail = f"checker timeout after {check_timeout} seconds"
+        elif check.get("type") == "okra_store_governance":
+            script = CHECKERS_DIR / "okra_store_governance.py"
+            if not path.exists():
+                detail = "missing store"
+            elif not script.exists():
+                detail = f"missing checker: {script}"
+            else:
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, str(script), str(path)],
+                        cwd=workspace,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        timeout=check_timeout,
+                    )
+                    passed = proc.returncode == 0
+                    detail = proc.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    detail = f"checker timeout after {check_timeout} seconds"
+        elif check.get("type") == "okra_checkin_steering":
+            script = CHECKERS_DIR / "okra_checkin_steering.py"
+            if not path.exists():
+                detail = "missing store"
+            elif not script.exists():
+                detail = f"missing checker: {script}"
+            else:
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, str(script), str(path)],
+                        cwd=workspace,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        timeout=check_timeout,
+                    )
+                    passed = proc.returncode == 0
+                    detail = proc.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    detail = f"checker timeout after {check_timeout} seconds"
+        elif check.get("type") == "operations_stale_metrics":
+            script = CHECKERS_DIR / "operations_stale_metrics.py"
+            if not path.exists():
+                detail = "missing file"
+            elif not script.exists():
+                detail = f"missing checker: {script}"
+            else:
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, str(script), str(path)],
+                        cwd=workspace,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        timeout=check_timeout,
+                    )
+                    passed = proc.returncode == 0
+                    detail = proc.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    detail = f"checker timeout after {check_timeout} seconds"
         else:
             detail = f"unknown check type: {check.get('type')}"
         results.append({**check, "passed": passed, "detail": detail})
@@ -788,23 +1066,31 @@ def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_time
 
 
 def model_identity(agent: str) -> dict[str, str]:
-    if agent == "codex":
-        env_name = "CODEX_MODEL"
-    elif agent == "claude":
-        env_name = "ANTHROPIC_MODEL"
-    else:
-        env_name = f"{agent.upper()}_MODEL"
-    requested = os.environ.get(env_name)
+    env_name = model_env_name(agent)
+    requested = requested_model(agent)
     if requested:
-        return {"requested": requested, "source": env_name}
-    return {"requested": "cli-default", "source": "unresolved"}
+        return {"requested": requested, "source": env_name, "delivery": "cli_flag"}
+    return {"requested": "cli-default", "source": "unresolved", "delivery": "agent_default"}
 
 
 def input_hashes(case: dict[str, Any], prompt: str) -> dict[str, Any]:
     checker_hashes: dict[str, str] = {}
     for check in case.get("checks", []):
-        if check.get("type") == "reverse_tornado_loop":
+        checker_type = check.get("type")
+        if checker_type == "reverse_tornado_loop":
             script = CHECKERS_DIR / "reverse_tornado_loop.py"
+            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+        elif checker_type == "okra_hard_gates":
+            script = CHECKERS_DIR / "okra_hard_gates.py"
+            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+        elif checker_type == "okra_store_governance":
+            script = CHECKERS_DIR / "okra_store_governance.py"
+            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+        elif checker_type == "okra_checkin_steering":
+            script = CHECKERS_DIR / "okra_checkin_steering.py"
+            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+        elif checker_type == "operations_stale_metrics":
+            script = CHECKERS_DIR / "operations_stale_metrics.py"
             checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
     return {
         "prompt_sha256": sha256_text(prompt),
@@ -820,7 +1106,10 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
     if args.isolation == "bwrap" and not command_exists("bwrap"):
         raise RunnerError("bwrap is required for --isolation bwrap")
     if args.isolation == "none" and not args.allow_unisolated:
-        raise RunnerError("--isolation none exposes eval cases/checks; pass --allow-unisolated to acknowledge this")
+        raise RunnerError(
+            "--isolation none exposes eval cases/checks and does not mount host auth files; "
+            "pass --allow-unisolated to acknowledge this structure-only path"
+        )
 
     cases = load_cases(args.case)
     keep_going = args.keep_going or args.agent == "both"
@@ -846,9 +1135,11 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 dry_run=args.dry_run,
                 timeout=args.timeout,
             )
-            checks = [] if args.dry_run else evaluate_checks(workspace, case["checks"])
-            if not args.dry_run and case.get("allowed_paths"):
+            checks = [] if args.dry_run else [evaluate_agent_execution(agent, run_dir, code)]
+            if not args.dry_run:
+                checks.extend(evaluate_checks(workspace, case["checks"]))
                 checks.append(evaluate_allowed_paths(workspace, case["allowed_paths"]))
+                checks.append(evaluate_credential_artifacts(run_dir))
             result = {
                 "case": case["id"],
                 "agent": agent,
@@ -868,12 +1159,16 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 ),
                 "agent_version": tool_version(agent),
                 "input_hashes": input_hashes(case, prompt),
-                "credential_policy": "agent auth file mounted read-only when required; sandbox env is cleared before agent launch",
+                "output_hashes": {} if args.dry_run else output_hashes(run_dir, workspace),
+                "credential_policy": (
+                    "agent auth file mounted read-only when required; sandbox env is cleared before "
+                    "agent launch; preserved run artifacts are scanned for known credential patterns"
+                ),
                 "exit_code": code,
                 "dry_run": args.dry_run,
                 "checks": checks,
             }
-            (run_dir / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            write_result(run_dir, result)
             failed_checks = [check for check in checks if not check["passed"]]
             if code or failed_checks:
                 failures += 1
