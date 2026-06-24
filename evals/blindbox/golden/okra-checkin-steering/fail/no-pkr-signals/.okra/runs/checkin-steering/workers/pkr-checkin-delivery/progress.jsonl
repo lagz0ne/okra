@@ -1,1 +1,1 @@
-{"payload":{"type":"pkr_worker_progress","worker_scope":"PKR progression","status":"running","next_report_at":"+10m"}}
+{"payload":{"next_report_at":"+10m","status":"running","type":"pkr_worker_progress","worker_scope":"PKR progression"},"payload_sha256":"8e5bb2deda88ecc50783561c7e271136756dc140de004a5bbf4b97b64eac856a","prev_hash":"GENESIS","record_hash":"6fa6481ab4ce1cf4d6f36e9a77793955150cdaf9bd2884146320922a0f972125","recorded_at":"2026-06-23T00:00:00Z","seq":1}

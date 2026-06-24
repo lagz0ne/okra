@@ -18,6 +18,11 @@ class Requirement:
     detail: str
 
 
+EXPECTED_FAIL_PATTERNS = {
+    "stale-not-blocked.md": r"stale metrics must block committing dispatch",
+}
+
+
 def has(pattern: str, text: str) -> bool:
     return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL) is not None
 
@@ -178,6 +183,10 @@ def calibrate(root: Path) -> int:
         violations = analyze(read_text(path))
         if not violations:
             failures.append(f"{path}: expected at least one stale-metric violation, got pass")
+            continue
+        expected = EXPECTED_FAIL_PATTERNS.get(path.name)
+        if expected and not has(expected, "\n".join(violations)):
+            failures.append(f"{path}: expected violation matching {expected!r}, got: {', '.join(violations[:5])}")
 
     if failures:
         print("operations stale-metric calibration failed:", file=sys.stderr)

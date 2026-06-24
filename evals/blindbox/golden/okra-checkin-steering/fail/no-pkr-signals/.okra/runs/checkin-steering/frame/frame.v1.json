@@ -1,0 +1,65 @@
+{
+  "frame_version": "frame.v1",
+  "frame_hash": "sha256:healthy-checkin-steering-frame",
+  "frame_state": "human-ratified-from-fixture",
+  "objective": {
+    "id": "obj-healthy-checkins",
+    "metric": "healthy_checkin_rate",
+    "target": 0.9,
+    "comparator": ">=",
+    "unit": "ratio"
+  },
+  "anti_goals": [
+    {
+      "id": "ag-dkr-budget",
+      "metric": "dkr_budget_overrun_count",
+      "threshold": 0,
+      "comparator": "=="
+    },
+    {
+      "id": "ag-unsteered-worker-edge",
+      "metric": "unsteered_worker_edge_count",
+      "threshold": 0,
+      "comparator": "=="
+    },
+    {
+      "id": "ag-no-progress-loop",
+      "metric": "no_progress_loop_continuation_count",
+      "threshold": 0,
+      "comparator": "=="
+    }
+  ],
+  "metric_contracts": {
+    "objective": {
+      "source_of_truth": ".okra/runs/checkin-steering/ledger.jsonl and checkins.jsonl",
+      "read_method": "direct append-only record inspection",
+      "max_age": "one check-in",
+      "lag_window": "none for fixture steering records"
+    },
+    "anti_goals": {
+      "source_of_truth": ".okra/runs/checkin-steering/ledger.jsonl and worker progress",
+      "read_method": "direct budget and steering signal reads",
+      "max_age": "one check-in",
+      "missing_data_policy": "pause and open cannot"
+    }
+  },
+  "action_envelope": {
+    "allowed": [
+      "write run-scoped worker progress",
+      "append steering check-ins",
+      "pause DKR on budget exhaustion"
+    ],
+    "forbidden": [
+      "promote CKR or PKR before DKR checkpoint acceptance",
+      "continue unbudgeted DKR",
+      "change thresholds without human approval"
+    ]
+  },
+  "human_approval_record": {
+    "source": "check-in steering fixture",
+    "approved_paths": [
+      ".okra/",
+      "tasks/okra-checkin-steering.md"
+    ]
+  }
+}

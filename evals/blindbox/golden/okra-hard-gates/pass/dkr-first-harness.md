@@ -31,18 +31,24 @@ not dispatched as executable work.
 ## DKR Layer
 
 - DKR-1: Probe which anti-patterns are deterministically observable. Budget: one design pass and
-  one golden-fixture pass. Unknown: which signals are reliable from markdown alone. Probability:
+  one golden-fixture pass. Decision target: decide whether to hard-gate solution-rush and cascade
+  or leave them to rubric review. Unknown: which signals are reliable from markdown alone. Risk if
+  skipped: the harness may chase the objective score while accepting anti-goal traps. Probability:
   70% of solution-rush and cascade can be hard-gated; 30% needs rubric review.
-- DKR-2: Probe DKR-to-CKR-to-PKR traceability. Budget: one design pass. Unknown: how much causal
-  evidence is enough. Probability: 65% deterministic when source DKR links are explicit.
-- DKR-3: Probe metric signal semantics. Budget: one design pass. Unknown: how to distinguish too
-  easy, too hard, stale, non-moving, disconnected, noisy, or gamed metrics. Probability: 55%
-  deterministic, 45% rubric.
+- DKR-2: Probe DKR-to-CKR-to-PKR traceability. Budget: one design pass. Decision target: decide
+  whether CKR/PKR candidates can be promoted onto the working board. Unknown: how much causal
+  evidence is enough. Anti-goal uncertainty: traceability gaps may let vague progress hide unsafe
+  or pointless work. Probability: 65% deterministic when source DKR links are explicit.
+- DKR-3: Probe metric signal semantics. Budget: one design pass. Decision target: decide whether to
+  continue, pause, or re-aim when a metric looks too easy, too hard, stale, non-moving, disconnected,
+  noisy, or gamed. Risk if skipped: the orchestrator may keep moving through the maze without seeing
+  traps. Probability: 55% deterministic, 45% rubric.
 
 Each DKR must produce a learning checkpoint before any CKR or PKR is promoted from candidate status:
-evidence collected, questions answered and unanswered, probability updates, candidate CKRs, and
-remaining unknowns. The orchestrator accepts or rejects the checkpoint. Candidate CKRs and candidate
-PKRs stay off the working board until that checkpoint is accepted.
+decision target, evidence collected, questions answered and unanswered, probability updates, risk or
+anti-goal implications, candidate CKRs, and remaining unknowns. The orchestrator accepts or rejects
+the checkpoint. Candidate CKRs and candidate PKRs stay off the working board until that checkpoint is
+accepted.
 
 ## CKR Layer
 

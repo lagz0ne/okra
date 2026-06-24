@@ -31,7 +31,8 @@ rubric score.
 Hard violations:
 
 - Solution rush: the artifact jumps to a large PKR/task list before DKR has surfaced uncertainty,
-  options, probabilities, a learning checkpoint, and reasons for choosing CKRs.
+  options, probabilities, a learning checkpoint, the steering decision to unlock, the risk or
+  anti-goal uncertainty to reduce, and reasons for choosing CKRs.
 - Cascade: the artifact treats lower-level task completion as progress toward CKR/objective success
   instead of using direct metric reads.
 - Boundary drift: the artifact changes the objective, anti-goal, thresholds, metric definitions, or
@@ -40,7 +41,8 @@ Hard violations:
   or not used as signals.
 - DKR abuse: discovery is absent, disconnected from CKR/PKR design, too broad, too numerous, too
   long-running, missing budget/stopping rules, or missing an orchestrator-accepted learning
-  checkpoint before CKR/PKR promotion.
+  checkpoint before CKR/PKR promotion. It is also abuse when DKR is vague process optimization
+  without a named decision target and risk/anti-goal uncertainty.
 - Disconnected refinement: DKR findings do not shape CKR metrics, or CKRs do not shape focused PKR
   progress.
 - Stale steering: the artifact has no check-in cadence, no CKR-level mini reverse tornado, or no
@@ -52,7 +54,9 @@ The harness should evaluate OKRA as a bounded box:
 
 - Objective and anti-goal define the outer boundary.
 - DKR, CKR, and PKR shape the middle.
-- DKR contributes reasoning and probability-weighted options.
+- DKR contributes reasoning and probability-weighted options for a specific steering decision. It
+  reduces uncertainty and maps traps so the orchestrator can choose, pause, promote, or re-aim
+  without blindly over-focusing on the objective.
 - CKR proves that progress is meaningful for the objective. Each CKR has its own mini reverse
   tornado: a discovery layer to test whether the CKR matters, a direct metric, and a delivery path
   only after the uncertainty is reduced.
@@ -70,7 +74,8 @@ The harness should evaluate OKRA as a bounded box:
 - DKR and PKR are the executable subagent work. CKR is measurable contribution context for the
   orchestrator, not a subagent task.
 - CKR/PKR entries stay candidate-only until the orchestrator accepts a DKR learning checkpoint with
-  evidence, probability/confidence updates, and remaining unknowns.
+  decision target, evidence, probability/confidence updates, risk or anti-goal implications, and
+  remaining unknowns.
 
 The harness should reject outputs that only fill the middle with plausible tasks.
 
@@ -90,7 +95,8 @@ Expected output:
 - A hard-gate list with deterministic signals.
 - A scored-rubric list for softer quality signals.
 - Known false-positive and false-negative risks.
-- DKR learning checkpoint schema and candidate-promotion rule.
+- DKR learning checkpoint schema with decision target, risk/anti-goal uncertainty, and
+  candidate-promotion rule.
 
 Probability output:
 
@@ -108,7 +114,8 @@ Expected output:
 - A traceability contract linking each CKR to DKR evidence.
 - A traceability contract linking each PKR/task group to a CKR and the DKR evidence that made it
   likely to matter.
-- Rules for empty DKR results, uncertainty, probabilities, and confidence changes.
+- Rules for empty DKR results, decision targets, risk/anti-goal uncertainty, probabilities, and
+  confidence changes.
 
 ### DKR-3: Signal Semantics
 
@@ -249,6 +256,8 @@ Candidate observable signals:
 
 - No DKR before CKR/PKR.
 - DKR has no scope, budget, stopping rule, or expected output.
+- DKR does not name the steering decision it unlocks or improves.
+- DKR does not name the risk or anti-goal uncertainty it reduces.
 - DKR has no learning checkpoint with evidence, probability/confidence update, and remaining
   unknowns.
 - CKR/PKR candidates are promoted before the orchestrator accepts the checkpoint.
@@ -273,7 +282,7 @@ Candidate observable signals:
 
 - No check-in cadence, heartbeat, or `next_check_at`.
 - No ten-minute heartbeat or equivalent time-based check-in for long-running subagents.
-- No file-based worker progress report such as `.okra/workers/<worker-id>/progress.jsonl`.
+- No file-based worker progress report such as `.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl`.
 - CKRs do not contain a mini reverse tornado balancing discovery and delivery.
 
 ### Gate H: Loop Ownership Drift
@@ -300,7 +309,8 @@ Use soft scoring only after all hard gates pass.
 Candidate dimensions:
 
 - Objective and anti-goal boundary quality.
-- DKR quality: scoped, plural when useful, budgeted, uncertainty-aware, probability-producing.
+- DKR quality: scoped, plural when useful, budgeted, decision-unlocking, risk-aware,
+  uncertainty-aware, probability-producing.
 - CKR quality: measurable, meaningful, tied to objective movement, direct metric source.
 - PKR quality: focused, high quality, do-and-check, linked to CKR.
 - No-cascade discipline: progress reads from direct metrics, not task rollups.
@@ -370,7 +380,7 @@ score with one accepted hard violation is a failed harness.
 - `overfit`: agents pass only because the prompt mirrors the rubric too closely.
 - `underfit`: good artifacts fail because the checker over-constrains wording instead of behavior.
 - `stale_steering`: PKR work can run too long before the orchestrator re-evaluates learning,
-  context, process, and anti-goal risk.
+  context, process, decision readiness, and anti-goal risk.
 
 ## Operating Loop
 
@@ -379,10 +389,10 @@ Cadence:
 - Start with DKR probes and golden fixture calibration.
 - Run real Codex/Claude blindbox only after golden positives and negatives behave correctly.
 - Re-run golden fixtures whenever the skill, rubric, checker, runner, or prompt changes.
-- Every check-in re-evaluates DKR/CKR/PKR work, recollects learning, optimizes process/context, and
-  decides whether steering is still on time.
-- Every long-running worker writes `.okra/workers/<worker-id>/progress.jsonl` on completion, unknown
-  discovery, flag-worthy risk, and the ten-minute heartbeat.
+- Every check-in re-evaluates DKR/CKR/PKR work, recollects learning, checks whether DKR has unlocked
+  a real steering decision, optimizes process/context, and decides whether steering is still on time.
+- Every long-running worker writes `.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl` on
+  completion, unknown discovery, flag-worthy risk, and the ten-minute heartbeat.
 
 Freshness:
 

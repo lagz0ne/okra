@@ -1,0 +1,13 @@
+{
+  "committed_at": "2026-06-23T00:20:00Z",
+  "idempotency_key": "storage-governance/frame.v1/healthy-governed-content-use/pkr-2/write-content/tasks/okra-governed-loop.md/044e592016185383cba61bf48bbbf70f398047451dcb18b30e626aed5d695540",
+  "key_sha256": "01ea44eacf807ec3a5a141ce70e36b78fba3960a1927703a60c1ec4b66fdf105",
+  "payload": {
+    "content_sha256": "044e592016185383cba61bf48bbbf70f398047451dcb18b30e626aed5d695540",
+    "move_kind": "write-content",
+    "target": "tasks/okra-governed-loop.md",
+    "tree_node_id": "pkr-2",
+    "type": "content_write_result"
+  },
+  "payload_sha256": "3c578694b7a0cc703a087fbc5c6b770b0b18ffccaae268af2040d606798a6957"
+}

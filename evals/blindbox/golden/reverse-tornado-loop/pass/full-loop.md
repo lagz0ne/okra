@@ -15,6 +15,8 @@ No-cascade rule: task completion is scaffolding, not scoreboard. Progress is onl
 read from the source of truth.
 
 DKR: discovery probe with a 2-turn budget to learn which onboarding delay most affects activation.
+Decision target: decide whether to promote the first-session completion CKR or keep discovery open.
+Risk intent: reduce anti-goal uncertainty so onboarding changes do not create support-ticket traps.
 The DKR writes learning, confidence, and remaining unknowns.
 
 CKR: measurable contribution context, not worker work. Metric target is first-session completion

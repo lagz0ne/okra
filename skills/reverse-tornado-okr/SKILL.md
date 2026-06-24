@@ -18,7 +18,9 @@ description: >
 This skill is a workflow. Given any goal, it sets the goal up so an LLM can drive most of the work
 while a human keeps the direction. The core picture is a reverse tornado: wide guessing on day
 one, narrowing loop by loop into known work, bounded the whole way by a wall it cannot cross
-(the anti-goal), stopping when the metric hits target.
+(the anti-goal), stopping when the metric hits target. Another useful picture: the objective is the
+maze exit, anti-goals are traps, and discovery maps enough of the maze that the loop can keep moving
+without blindly sprinting into danger.
 
 Apply the steps below in order. Do not skip the anti-goal - it is what makes the rest safe.
 
@@ -58,12 +60,17 @@ One measured wall is required; documenting what it does not cover keeps it hones
 Decompose work into exactly three kinds. Keep them distinct; blurring them is where these systems rot.
 
 - **DKR - Discovery.** Unmeasurable. A *scoped probe* at one unclear slice ("which channel
-  converts?"). Its aim is to **maximize learning**. It is plural - many fire per level, some
-  mid-execution. It has a **resource budget** (turns/time), because unmeasurable work has no natural
-  stopping point. It returns structure (one or many CKRs) with probabilities/confidence, or returns
-  empty - empty is still useful. A DKR is complete only when it writes a **learning checkpoint**:
-  evidence collected, questions answered/unanswered, probability/confidence updates, candidate CKRs,
-  and the next unknowns. CKR/PKR entries stay candidate-only until the orchestrator accepts that
+  converts?"). Its aim is not generic research; it is **intentional uncertainty reduction for a
+  named steering decision**. A valid DKR says which decision it will unlock or improve: whether to
+  promote a CKR, fund a PKR, spawn more discovery, admit/veto a risky move, pause, or re-aim. It
+  also names the risk or anti-goal uncertainty it is meant to reduce, because over-focusing on the
+  objective is how the loop runs into traps. It is plural - many fire per level, some mid-execution.
+  It has a **resource budget** (turns/time), because unmeasurable work has no natural stopping point.
+  It returns structure (one or many CKRs) with probabilities/confidence, or returns empty - empty is
+  still useful when it tells the orchestrator not to fund a path. A DKR is complete only when it
+  writes a **learning checkpoint**: decision target, evidence collected, questions answered/
+  unanswered, probability/confidence updates, risk or anti-goal implications, candidate CKRs, and
+  the next unknowns. CKR/PKR entries stay candidate-only until the orchestrator accepts that
   checkpoint.
 - **CKR - Contribution / Key Result.** Measurable, has its own metric. This is what counts toward
   the objective. A CKR is **context and measurement**, not a worker job. It tells the orchestrator
@@ -85,9 +92,11 @@ it carries the authority lines. Each tier hands control *up* when it reaches the
 metric contracts, and action envelope - all human-set). It owns the OKR board, governs check-ins,
 decides the next move, runs the three-point anti-goal eval (especially admissibility, *before*
 dispatch), spawns and budgets workers, reads the direct objective/CKR/anti-goal metrics, raises the
-flags, and is the only part that talks to the human. It also owns the **DKR learning gate**: no CKR
-or PKR is promoted onto the working board until a DKR worker has returned a learning checkpoint with
-evidence and probability/confidence updates. The orchestrator steers within the cone. It never
+  flags, and is the only part that talks to the human. It also owns the **DKR learning gate**: no CKR
+  or PKR is promoted onto the working board until a DKR worker has returned a learning checkpoint with
+  a decision target, evidence, probability/confidence updates, and risk/anti-goal implications. The
+  checkpoint must make the next steering decision safer or clearer; "we learned things" is not enough.
+  The orchestrator steers within the cone. It never
 executes work itself and never edits the frame. It also does **not** stop because a board, branch,
 PKR list, or worker queue is complete; it keeps checking, steering, and dispatching until the
 objective target is achieved, a human changes/stops the frame, or a blocking flag requires human
@@ -97,8 +106,9 @@ resolution. Every serious artifact should state this loop-ownership rule explici
 units. There is no CKR worker; CKR remains orchestrator-owned context.
 
 - **Discovery worker** runs a single scoped DKR probe - spends its turn budget, watches its own
-  learning, writes progress reports, and returns a learning checkpoint with evidence,
-  probability/confidence updates, candidate CKRs, or empty.
+  learning, writes progress reports, and returns a learning checkpoint with the decision it was meant
+  to unlock, evidence, probability/confidence updates, risk/anti-goal implications, candidate CKRs,
+  or empty.
 - **Progression worker** executes one PKR/task - do-and-check, within its scope only.
 
 The cardinal worker rule: **a worker that hits an unknown mid-run does not improvise - it hands back
@@ -288,7 +298,8 @@ For delegated loops, make these four lines explicit in the artifact:
 
 - The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the
   objective metric reaches target or a human/blocking flag stops the loop.
-- DKRs are scoped discovery-worker probes with budgets and probability/confidence outputs.
+- DKRs are scoped discovery-worker probes with budgets, probability/confidence outputs, a named
+  steering decision to unlock, and explicit risk/anti-goal uncertainty to reduce.
 - CKR/PKR candidates are not promoted until the orchestrator accepts a DKR learning checkpoint.
 - CKRs are measurable contribution context with mini reverse-tornado discovery/delivery balance,
   not subagent work.
@@ -306,7 +317,10 @@ single file, no external runtime, no decoration that does not carry meaning).
 - Rolling completed tasks up into "done" instead of reading the direct metric (cascade).
 - Treating the anti-goal as one end-of-loop check instead of three points.
 - Letting an execution task absorb a discovery instead of handing back.
-- Promoting CKRs or PKRs before a DKR learning checkpoint has produced evidence and probabilities.
+- Running DKR as vague research, process optimization, or goal-chasing without naming the steering
+  decision it unlocks and the risk or anti-goal uncertainty it reduces.
+- Promoting CKRs or PKRs before a DKR learning checkpoint has produced evidence, probabilities, and
+  decision-ready risk implications.
 - Letting the loop redefine, retune, or switch the goal. That is always the human's call.
 - Running a recurring OKR loop without a freshness contract, heartbeat, lag window, and flag owner.
 - Running multiple OKRA loops against the same flat `.okra/ledger.jsonl`, `.okra/checkins.jsonl`,

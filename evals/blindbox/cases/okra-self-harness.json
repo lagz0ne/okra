@@ -3,7 +3,7 @@
   "description": "A blindbox case where an agent must use OKRA to design the OKRA eval harness without rushing to PKR implementation.",
   "skill": "reverse-tornado-okr",
   "fixture": "okra-self-harness",
-  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-self-harness.md. Treat the requested harness as a delegated OKRA loop design, not as implementation work. The artifact must make DKR-first reasoning explicit before CKR and PKR, include probability-weighted discovery outputs, and define the DKR learning checkpoint that must be accepted by the orchestrator before CKR/PKR candidates are promoted onto the working board. Define hard gates for the anti-patterns in the repository, show how each CKR has a mini reverse-tornado discovery/delivery balance as orchestrator-owned context, and define check-in cadence plus PKR progress signals for timely steering. Make the loop ownership explicit: the orchestrator owns objective checks, check-ins, the OKR board, and subagent steering; it does not stop because PKRs or board items are complete; DKR and PKR are subagent work; CKR is measurable context, not a subagent task. For long-running subagents, specify a ten-minute timed heartbeat and file-based worker progress reports under `.okra/workers/<worker-id>/progress.jsonl`. Do not implement checker code or create anything outside the requested task artifact.",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-self-harness.md. Treat the requested harness as a delegated OKRA loop design, not as implementation work. The artifact must make DKR-first reasoning explicit before CKR and PKR, include probability-weighted discovery outputs, and define the DKR learning checkpoint that must be accepted by the orchestrator before CKR/PKR candidates are promoted onto the working board. Every DKR must name the steering decision it is meant to unlock or improve, the uncertainty it reduces, and the risk or anti-goal trap it clarifies so the harness does not over-focus on objective progress at the expense of safety. Define hard gates for the anti-patterns in the repository, show how each CKR has a mini reverse-tornado discovery/delivery balance as orchestrator-owned context, and define check-in cadence plus PKR progress signals for timely steering. Make the loop ownership explicit: the orchestrator owns objective checks, check-ins, the OKR board, and subagent steering; it does not stop because PKRs or board items are complete; DKR and PKR are subagent work; CKR is measurable context, not a subagent task. For long-running subagents, describe a ten-minute timed heartbeat and run-scoped file-based worker progress reports under `.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl`; do not create the store in this describe-only case. Do not implement checker code or create anything outside the requested task artifact.",
   "allowed_paths": [
     "tasks/okra-self-harness.md"
   ],
@@ -11,6 +11,19 @@
     {
       "type": "file_exists",
       "path": "tasks/okra-self-harness.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "tasks/okra-self-harness.md",
+      "contains": [
+        "okra_harness_acceptance_score",
+        "hard_okra_violation_count_in_accepted_runs",
+        "Solution rush",
+        "Cascade",
+        "Boundary drift",
+        "Metric theater",
+        "Stale steering"
+      ]
     },
     {
       "type": "reverse_tornado_loop",

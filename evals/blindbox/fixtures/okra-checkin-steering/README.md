@@ -32,6 +32,16 @@ Use a run-scoped OKRA store:
 - write DKR and PKR worker progress under `.okra/runs/checkin-steering/workers/`
 - append objective and anti-goal metric reads to `.okra/runs/checkin-steering/ledger.jsonl`
 - append steering check-ins to `.okra/runs/checkin-steering/checkins.jsonl`
+- append flag lifecycle policy records to `.okra/runs/checkin-steering/flags.jsonl`
+
+The anti-goal ledger must directly read:
+
+- `dkr_budget_overrun_count == 0`
+- `unsteered_worker_edge_count == 0`
+- `no_progress_loop_continuation_count == 0`
+
+The flag policy must cover cannot, breaking, pointless, and authority drift with open,
+acknowledged, resolved, and waived states plus the pause/stop/resume behavior.
 
 The orchestrator owns check-ins and steering. Workers report; they do not promote CKRs/PKRs, change
 scope, or decide to keep spending DKR budget.

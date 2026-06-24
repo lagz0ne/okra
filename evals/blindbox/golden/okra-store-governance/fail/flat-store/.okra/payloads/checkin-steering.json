@@ -1,0 +1,124 @@
+{
+  "type": "steering_checkin",
+  "round": 1,
+  "frame_ref": ".okra/frame/frame.v1.json",
+  "tree_ref": ".okra/tree/tree.v1.json",
+  "objective_read": {
+    "metric": "governed_content_use_rate",
+    "value": 1.0,
+    "freshness_status": "fresh",
+    "direct_read": true
+  },
+  "anti_goal_read": [
+    {
+      "metric": "ungoverned_direct_read_count",
+      "value": 0,
+      "freshness_status": "fresh",
+      "direct_read": true
+    },
+    {
+      "metric": "ungoverned_direct_write_count",
+      "value": 0,
+      "freshness_status": "fresh",
+      "direct_read": true
+    },
+    {
+      "metric": "single_llm_truth_acceptance_count",
+      "value": 0,
+      "freshness_status": "fresh",
+      "direct_read": true
+    }
+  ],
+  "active_dkrs": [
+    "dkr-1"
+  ],
+  "active_ckrs": [
+    "ckr-1",
+    "ckr-2",
+    "ckr-3"
+  ],
+  "active_pkrs": [
+    "pkr-1",
+    "pkr-2",
+    "pkr-3"
+  ],
+  "dkr_learning_checkpoint": {
+    "dkr_id": "dkr-1",
+    "status": "accepted_by_orchestrator",
+    "accepted_at": "2026-06-23T00:10:00Z",
+    "probability_confidence_outputs": {
+      "governed_read_detection": 0.94,
+      "governed_write_detection": 0.96,
+      "independent_acceptance_detection": 0.9
+    }
+  },
+  "candidate_ckrs": [
+    {
+      "id": "ckr-1",
+      "promotion_status": "promoted_after_checkpoint"
+    },
+    {
+      "id": "ckr-2",
+      "promotion_status": "promoted_after_checkpoint"
+    },
+    {
+      "id": "ckr-3",
+      "promotion_status": "promoted_after_checkpoint"
+    }
+  ],
+  "candidate_pkrs": [
+    {
+      "id": "pkr-1",
+      "promotion_status": "promoted_after_checkpoint"
+    },
+    {
+      "id": "pkr-2",
+      "promotion_status": "promoted_after_checkpoint"
+    },
+    {
+      "id": "pkr-3",
+      "promotion_status": "promoted_after_checkpoint"
+    }
+  ],
+  "worker_progress_refs": [
+    ".okra/workers/dkr-governed-content-map-001/progress.jsonl"
+  ],
+  "pkr_signals": {
+    "pkr-1": {
+      "off_track": false,
+      "quality_drift": false,
+      "churn": false,
+      "late_discovery": false,
+      "stale_metrics": false,
+      "scope_or_authority_concern": false
+    },
+    "pkr-2": {
+      "off_track": false,
+      "quality_drift": false,
+      "churn": false,
+      "late_discovery": false,
+      "stale_metrics": false,
+      "scope_or_authority_concern": false
+    },
+    "pkr-3": {
+      "off_track": false,
+      "quality_drift": false,
+      "churn": false,
+      "late_discovery": false,
+      "stale_metrics": false,
+      "scope_or_authority_concern": false
+    }
+  },
+  "open_flags": [],
+  "learning_collected": [
+    "Governed content use is directly measurable from helper records.",
+    "Generated status is a view; append-only records remain source of truth.",
+    "Acceptance must cite deterministic evidence rather than final narrative."
+  ],
+  "process_context_updates": [
+    "CKR and PKR candidates promoted only after DKR checkpoint acceptance.",
+    "Final artifact must be written through helper write-content."
+  ],
+  "next_check_at": "2026-06-23T00:20:00Z",
+  "steering_decision": "continue: publish final artifact through write-content, append acceptance evidence, generate status, and verify store"
+}

@@ -26,10 +26,13 @@ Use the dry-run to inspect prompt packets and bwrap commands before spending mod
 
 ## Real Eval
 
-Run real isolated evals when credentials and model access are available. The default scored path
-runs every blindbox case, including storage governance and check-in steering:
+Run real isolated evals when credentials and model access are available. Scored runs must pin model
+labels through `CODEX_MODEL` and `ANTHROPIC_MODEL` so `result.json` records the model requested by
+each CLI. The default scored path runs every blindbox case, including storage governance and
+check-in steering:
 
 ```sh
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both
 ```
 
@@ -37,22 +40,36 @@ For a narrower smoke pass while iterating, run the core text cases plus the two 
 cases explicitly:
 
 ```sh
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case smoke-reverse-tornado
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
+scripts/run-blindbox.sh --agent both --case okra-self-harness
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case real-life-operations
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-storage-governance
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-checkin-steering
 ```
 
-The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace and run directory as writable, selected system/tool paths as read-only, and per-run writable agent homes. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
+The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace plus per-run agent home, cache, and output directories as writable during execution; runtime scratch directories are scrubbed after the agent exits, and archived prompt and command packets are kept outside writable sandbox mounts. Selected system/tool paths are read-only. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
 
 The bwrap environment is cleared before launch, then the runner sets only the per-run HOME, cache,
 PATH, and locale variables it needs. Agent auth files are still mounted read-only when required for
 model access, so scored runs should use trusted fixtures/prompts or eval-scoped credentials. Results
-record input hashes, CLI version, allowed-path checks, and checker timeouts.
+record input hashes, requested model labels, CLI version, allowed-path checks, and checker timeouts.
+The credential artifact audit scans preserved run artifacts; runtime home/cache/output scratch
+directories are scrubbed as containment and are not treated as preserved evidence after deletion.
 
 Do not use `--isolation none` for scored runs. The runner refuses it unless `--allow-unisolated`
 is passed because unisolated workspaces can read the repo-local eval cases and checkers, and this
 path does not mount host agent auth files. Treat it as a structure-only debugging mode.
+
+If bwrap isolation itself looks broken, run:
+
+```sh
+python3 scripts/okr-runner.py doctor --check-bwrap
+```
 
 ## Review
 

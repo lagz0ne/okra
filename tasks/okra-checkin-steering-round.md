@@ -23,6 +23,8 @@ check time.
 
 DKR is the quality lever, but it is the dangerous spend surface. Every DKR worker must carry:
 
+- steering decision to unlock or improve
+- risk or anti-goal uncertainty to reduce
 - turn/time budget
 - spent and remaining budget
 - stop rule
@@ -35,12 +37,15 @@ DKR is the quality lever, but it is the dangerous spend surface. Every DKR worke
 A DKR that exhausts budget without enough learning opens `cannot`; it does not silently ask for
 "better DKR" forever.
 
+A DKR that only says "optimize the process" or "improve the approach" without naming the next
+orchestrator decision is not healthy discovery. It is vague spend.
+
 ## CKR
 
 CKRs are measurable steering context, not worker jobs:
 
-- `dkr_checkpoint_acceptance_quality`: DKR checkpoints accepted only with evidence, budget state,
-  probability/confidence update, and next unknowns.
+- `dkr_checkpoint_acceptance_quality`: DKR checkpoints accepted only with decision target, risk or
+  anti-goal implication, evidence, budget state, probability/confidence update, and next unknowns.
 - `pkr_signal_coverage`: PKR check-ins include off-track, quality drift, churn, late discovery,
   stale metric, and authority/scope signals.
 - `steering_decision_coverage`: every check-in has inbound steering input and outbound steering

@@ -1,0 +1,116 @@
+{
+  "frame_version": "frame.v1",
+  "frame_hash": "sha256:governed-store-frame-v1",
+  "frame_state": "human-ratified-from-repository-fixture",
+  "ratified_at": "2026-06-23T00:00:00Z",
+  "frame_owner": "human",
+  "orchestrator_owner": "okra-orchestrator",
+  "objective": {
+    "id": "obj-governed-content-use",
+    "metric": "governed_content_use_rate",
+    "target": 0.9,
+    "comparator": ">=",
+    "unit": "ratio",
+    "definition": "scored OKRA harness runs with all important content reads and final artifact writes represented by content-addressed store records divided by total scored OKRA harness runs"
+  },
+  "anti_goals": [
+    {
+      "id": "ag-no-ungoverned-direct-read",
+      "metric": "ungoverned_direct_read_count",
+      "threshold": 0,
+      "comparator": "==",
+      "type": "tripwire",
+      "definition": "count of important fixture, source, skill, or prior-progress reads used for planning without a corresponding governed content hash or source check-in"
+    },
+    {
+      "id": "ag-no-ungoverned-direct-write",
+      "metric": "ungoverned_direct_write_count",
+      "threshold": 0,
+      "comparator": "==",
+      "type": "tripwire",
+      "definition": "count of important artifact writes, including tasks/okra-governed-loop.md, missing helper write-content or equivalent target plus content hash record"
+    },
+    {
+      "id": "ag-no-single-llm-truth",
+      "metric": "single_llm_truth_acceptance_count",
+      "threshold": 0,
+      "comparator": "==",
+      "type": "tripwire",
+      "definition": "count of acceptance decisions based only on one LLM narrative without deterministic evidence, content hashes, changed-path evidence, human ratification, or independent review"
+    }
+  ],
+  "metric_contracts": {
+    "objective": {
+      "source_of_truth": ".okra/checkins.jsonl content_read/content_write records plus changed-path/deterministic checker evidence",
+      "owner": "okra-orchestrator",
+      "read_method": "direct append-only log read and deterministic changed-path check",
+      "max_age": "1 turn",
+      "lag_window": "none for fixture storage actions; harness aggregate judged after scored run closes",
+      "missing_data_policy": "pause committing artifact writes and open breaking"
+    },
+    "anti_goals": {
+      "source_of_truth": ".okra/checkins.jsonl, .okra/ledger.jsonl, helper verify output, changed-path evidence",
+      "owner": "okra-orchestrator",
+      "read_method": "direct store records; no rollup from completed tasks",
+      "max_age": "1 turn",
+      "lag_window": "none for storage tripwires",
+      "missing_data_policy": "open breaking for missing read/write/verify evidence; open cannot if helper is unavailable"
+    }
+  },
+  "action_envelope": {
+    "allowed": [
+      "initialize .okra with helper",
+      "store required source files with helper put",
+      "read required source content with helper read-content",
+      "append ledger, flag, check-in, and worker progress records with helper",
+      "draft artifact under .okra/drafts",
+      "write final tasks/okra-governed-loop.md with helper write-content",
+      "generate .okra/status.md with helper status",
+      "verify .okra with helper verify"
+    ],
+    "forbidden": [
+      "implement product code",
+      "create files outside .okra/ and tasks/okra-governed-loop.md",
+      "inspect eval case definitions or expected checks",
+      "treat final LLM response as acceptance evidence"
+    ],
+    "approval_required": [
+      "changing objective target or anti-goal thresholds",
+      "relaxing tripwires",
+      "writing outside the approved paths"
+    ]
+  },
+  "anti_goal_coverage_review": {
+    "candidate_harms_considered": [
+      "source content used without durable read evidence",
+      "final task artifact written without content hash evidence",
+      "generated status edited by hand or trusted over append-only records",
+      "acceptance based only on model narrative"
+    ],
+    "selected_guardrails": [
+      "ungoverned_direct_read_count == 0",
+      "ungoverned_direct_write_count == 0",
+      "single_llm_truth_acceptance_count == 0"
+    ],
+    "rejected_guardrails": [
+      {
+        "metric": "database_backing_store_required",
+        "rationale": "current fixture explicitly stays bash-first and does not require a database, service, or daemon"
+      }
+    ],
+    "non_negotiable_tripwires": [
+      "missing source read record opens breaking",
+      "missing final write record opens breaking",
+      "store verification failure opens breaking",
+      "single-narrative acceptance opens breaking"
+    ],
+    "review_cadence": "each steering check-in and before reporting acceptance"
+  },
+  "human_approval_record": {
+    "source": "repository README and user task",
+    "approved_paths": [
+      ".okra/",
+      "tasks/okra-governed-loop.md"
+    ]
+  }
+}

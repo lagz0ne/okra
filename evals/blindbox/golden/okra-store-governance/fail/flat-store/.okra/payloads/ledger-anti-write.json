@@ -1,0 +1,16 @@
+{
+  "type": "metric_read",
+  "metric_kind": "anti_goal",
+  "metric_id": "ag-no-ungoverned-direct-write",
+  "metric": "ungoverned_direct_write_count",
+  "value": 0,
+  "unit": "count",
+  "threshold": 0,
+  "comparator": "==",
+  "observed_at": "2026-06-23T00:12:00Z",
+  "source": ".okra/checkins.jsonl content_write records and changed-path allowlist",
+  "read_method": "direct final-artifact target check after helper write-content",
+  "window": "current repository fixture run",
+  "freshness_status": "fresh",
+  "lag_window": "none"
+}

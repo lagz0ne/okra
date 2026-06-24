@@ -30,6 +30,8 @@ class Stats:
     pkr_count: int
     task_like_count: int
     has_uncertainty: bool
+    has_dkr_decision_unlock: bool
+    has_dkr_risk_reduction: bool
     has_dkr_budget: bool
     has_probability: bool
     has_direct_metric: bool
@@ -51,7 +53,14 @@ class Stats:
 
     @property
     def has_valid_dkr(self) -> bool:
-        return self.dkr_count > 0 and self.has_uncertainty and self.has_dkr_budget and self.has_probability
+        return (
+            self.dkr_count > 0
+            and self.has_uncertainty
+            and self.has_dkr_decision_unlock
+            and self.has_dkr_risk_reduction
+            and self.has_dkr_budget
+            and self.has_probability
+        )
 
     @property
     def has_all_units(self) -> bool:
@@ -119,6 +128,35 @@ def gather_stats(text: str) -> Stats:
         pkr_count=count(r"\bPKRs?\b", text),
         task_like_count=count_task_like_lines(text),
         has_uncertainty=has(r"\b(unknown|uncertain|uncertainty|question|hypothesis|probe|discovery|learn|learning)\b", text),
+        has_dkr_decision_unlock=has(
+            r"\b(DKR|discovery)\b[\s\S]{0,900}"
+            r"\b(decision(?: target)?|decision[_ -]?target|decision to (?:unlock|unblock|improve)|"
+            r"unlock(?:s|ing)? [^.\n]{0,120}decision|unblock(?:s|ing)? [^.\n]{0,120}decision|"
+            r"steering decision|promotion decision|next steering decision|"
+            r"responsibly (?:choose|promote|fund|dispatch|admit|veto)|"
+            r"whether to (?:promote|fund|spawn|continue|pause|admit|veto|re-aim|reaim)|"
+            r"decide whether to (?:promote|fund|spawn|continue|pause|admit|veto|re-aim|reaim))\b",
+            text,
+        )
+        or has(
+            r"\b(decision(?: target)?|decision[_ -]?target|decision to (?:unlock|unblock|improve)|"
+            r"steering decision|promotion decision|next steering decision)\b"
+            r"[\s\S]{0,500}\b(DKR|discovery)\b",
+            text,
+        ),
+        has_dkr_risk_reduction=has(
+            r"\b(DKR|discovery)\b[\s\S]{0,900}"
+            r"\b(risk(?: if skipped)?|risk_if_skipped|anti[- ]goal uncertainty|anti[- ]goal risk|"
+            r"guardrail uncertainty|trap|traps|safe|safety|unsafe|harm|wall|veto|admissibility|"
+            r"avoid wasting|not wasting|waste)\b",
+            text,
+        )
+        or has(
+            r"\b(risk(?: if skipped)?|risk_if_skipped|anti[- ]goal uncertainty|anti[- ]goal risk|"
+            r"guardrail uncertainty|trap|traps|safe|safety|unsafe|harm|wall|veto|admissibility)\b"
+            r"[\s\S]{0,500}\b(DKR|discovery)\b",
+            text,
+        ),
         has_dkr_budget=has(r"\b(budget|turns?|hours?|days?|max[_ -]?age|stopping rule|stop rule|stop when|timebox)\b", text),
         has_probability=has(r"\b(probability|probabilities|confidence|likelihood|odds|expected value|P\s*\(|\d{1,3}\s*%)\b", text),
         has_direct_metric=has(
@@ -366,6 +404,10 @@ def dkr_abuse(text: str, stats: Stats) -> Violation | None:
     missing = []
     if not stats.has_uncertainty:
         missing.append("uncertainty/probe")
+    if not stats.has_dkr_decision_unlock:
+        missing.append("decision target/unlock")
+    if not stats.has_dkr_risk_reduction:
+        missing.append("risk or anti-goal uncertainty")
     if not stats.has_dkr_budget:
         missing.append("budget/stopping rule")
     if not stats.has_probability:
@@ -487,6 +529,7 @@ def calibrate(root: Path) -> int:
         "dkr-learning-cycle.md": "dkr_abuse",
         "disconnected-layers.md": "disconnected_refinement",
         "dkr-abuse.md": "dkr_abuse",
+        "dkr-generic-optimization.md": "dkr_abuse",
         "loop-ownership-drift.md": "loop_ownership_drift",
         "metric-theater.md": "metric_theater",
         "solution-rush.md": "solution_rush",

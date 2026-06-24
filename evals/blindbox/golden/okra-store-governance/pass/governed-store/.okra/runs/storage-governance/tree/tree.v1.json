@@ -1,0 +1,141 @@
+{
+  "tree_version": "tree.v1",
+  "frame_version": "frame.v1",
+  "current_round": 1,
+  "orchestrator": {
+    "id": "okra-orchestrator",
+    "owns": [
+      "objective checks",
+      "metric freshness checks",
+      "three-point anti-goal evaluation",
+      "check-ins",
+      "OKR board",
+      "subagent steering",
+      "DKR learning gate"
+    ],
+    "does_not_stop_on": [
+      "PKR completion",
+      "board item completion",
+      "worker queue empty"
+    ],
+    "stop_conditions": [
+      "objective metric reaches target",
+      "human changes or stops the frame",
+      "blocking flag requires human resolution"
+    ]
+  },
+  "dkrs": [
+    {
+      "id": "dkr-1",
+      "title": "Map governed content-use failure modes to measurable harness signals",
+      "worker_id": "dkr-governed-content-map-001",
+      "budget": "1 repository inspection turn",
+      "status": "checkpoint_accepted",
+      "probability_outputs": {
+        "governed_content_use_rate_reaches_0_90_if_helper_flow_required": 0.82,
+        "missing_write_record_causes_breaking_detection": 0.93,
+        "single_llm_truth_prevented_by_acceptance_evidence_checkin": 0.9
+      },
+      "checkpoint": {
+        "accepted_by": "okra-orchestrator",
+        "accepted_at": "2026-06-23T00:10:00Z",
+        "evidence": [
+          "README.md content hash 02cfaee426420cd3a3f36d0c2dee278ce2a0099dcae8180b57a0f890908ad227",
+          "inputs/current-signals.md content hash 3a6447eb6a5f22a62849f1b570eb895e7362800452442741b8eb52468fae55ef",
+          ".okra/workers/dkr-governed-content-map-001/progress.jsonl"
+        ],
+        "promotion_decision": "promote CKR and PKR candidates listed in this tree"
+      }
+    }
+  ],
+  "ckrs": [
+    {
+      "id": "ckr-1",
+      "from_dkr": "dkr-1",
+      "metric": "source_read_record_coverage",
+      "target": 1.0,
+      "status": "promoted_after_dkr_checkpoint",
+      "mini_reverse_tornado": {
+        "discovery_balance": "identify every source category whose content influences the plan",
+        "direct_metric": "important source files with content_read records divided by important source files used",
+        "delivery_balance": "PKRs only add helper put/read-content steps and checker evidence after the source inventory is known"
+      }
+    },
+    {
+      "id": "ckr-2",
+      "from_dkr": "dkr-1",
+      "metric": "artifact_write_record_coverage",
+      "target": 1.0,
+      "status": "promoted_after_dkr_checkpoint",
+      "mini_reverse_tornado": {
+        "discovery_balance": "identify every final or important draft artifact that must be tied to a content hash",
+        "direct_metric": "important artifact writes with content_write records divided by important artifact writes",
+        "delivery_balance": "PKRs write drafts in .okra and publish final artifacts through write-content only after target paths are known"
+      }
+    },
+    {
+      "id": "ckr-3",
+      "from_dkr": "dkr-1",
+      "metric": "independent_acceptance_evidence_coverage",
+      "target": 1.0,
+      "status": "promoted_after_dkr_checkpoint",
+      "mini_reverse_tornado": {
+        "discovery_balance": "identify deterministic evidence needed to avoid single-LLM acceptance",
+        "direct_metric": "acceptance claims with deterministic evidence divided by total acceptance claims",
+        "delivery_balance": "PKRs gather verify output, content hashes, worker logs, and changed-path evidence before reporting success"
+      }
+    }
+  ],
+  "pkrs": [
+    {
+      "id": "pkr-1",
+      "from_ckr": "ckr-1",
+      "worker_kind": "progression",
+      "task": "store and read README.md and inputs/current-signals.md through helper put/read-content",
+      "status": "complete",
+      "progress_signals": {
+        "off_track": false,
+        "quality_drift": false,
+        "churn": false,
+        "late_discovery": false,
+        "stale_metrics": false,
+        "scope_or_authority_concern": false
+      }
+    },
+    {
+      "id": "pkr-2",
+      "from_ckr": "ckr-2",
+      "worker_kind": "progression",
+      "task": "draft the loop under .okra/drafts and publish tasks/okra-governed-loop.md through helper write-content",
+      "status": "ready_for_final_write",
+      "progress_signals": {
+        "off_track": false,
+        "quality_drift": false,
+        "churn": false,
+        "late_discovery": false,
+        "stale_metrics": false,
+        "scope_or_authority_concern": false
+      }
+    },
+    {
+      "id": "pkr-3",
+      "from_ckr": "ckr-3",
+      "worker_kind": "progression",
+      "task": "append steering and acceptance evidence check-ins, generate status, verify store, and record evidence summary",
+      "status": "in_progress",
+      "progress_signals": {
+        "off_track": false,
+        "quality_drift": false,
+        "churn": false,
+        "late_discovery": false,
+        "stale_metrics": false,
+        "scope_or_authority_concern": false
+      }
+    }
+  ],
+  "traceability": [
+    "dkr-1 -> ckr-1 -> pkr-1",
+    "dkr-1 -> ckr-2 -> pkr-2",
+    "dkr-1 -> ckr-3 -> pkr-3"
+  ]
+}

@@ -16,7 +16,8 @@ OKRA loops may run at the same time, keep the shared root as `.okra/` and place 
   Include `frame_version`, `frame_hash`, metric contracts, anti-goal coverage review, action
   envelope, and the human approval record.
 - `.okra/runs/<run-id>/tree/tree.v1.json`: current DKR/CKR/PKR decomposition and worker scopes.
-- `.okra/runs/<run-id>/moves/<idempotency-key>.json`: write-once committed move result.
+- `.okra/runs/<run-id>/moves/<key-sha256>.json`: write-once committed move result. Each file
+  records the full `idempotency_key`, `key_sha256`, `payload_sha256`, committed timestamp, and payload.
 - `.okra/runs/<run-id>/ledger.jsonl`: append-only direct objective and anti-goal readings with `observed_at`,
   `recorded_at`, source, query/report hash, window, value, unit, and freshness status.
 - `.okra/runs/<run-id>/flags.jsonl`: append-only `cannot`, `breaking`, `pointless`, and `authority_drift` flags with
@@ -24,8 +25,9 @@ OKRA loops may run at the same time, keep the shared root as `.okra/` and place 
 - `.okra/runs/<run-id>/checkins.jsonl`: append-only steering records for each ritual check-in, including learning
   collected, PKR signals, stale metrics, process/context updates, and next steering decision.
 - `.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl`: append-only file-based progress reports from DKR and PKR
-  workers. DKR reports include learning collected, probability/confidence updates, remaining
-  unknowns, candidate CKRs, and `next_report_at`.
+  workers. DKR reports include the steering decision the probe is meant to unlock, the risk or
+  anti-goal uncertainty it is reducing, learning collected, probability/confidence updates,
+  remaining unknowns, candidate CKRs, and `next_report_at`.
 
 Do not rewrite frame or ledger records to make a run look safer after the fact. Add a new reading or
 a human-ratified frame revision instead. A revision is a new immutable frame record with diff,
@@ -62,15 +64,16 @@ Dry-run propose-cost moves do not need idempotency keys because they do not comm
 3. Refuse and flag `authority_drift` if the worker or move tries to alter the frame, expand scope,
    bypass approval, relax a threshold, or leave the action envelope.
 4. Build the candidate move and run admissibility against the anti-goal.
-5. If CKR/PKR candidates depend on unresolved uncertainty, dispatch a DKR worker first and require a
-   learning checkpoint before promoting them onto the working board.
+5. If CKR/PKR candidates depend on unresolved uncertainty, dispatch a DKR worker first. The DKR must
+   name the steering decision it will unlock and the risk or anti-goal uncertainty it will reduce.
+   Require a learning checkpoint before promoting candidates onto the working board.
 6. If cost is unknown, run a propose-cost dry-run and admit or veto from that result.
 7. Construct the idempotency key for an admitted committing move.
-8. If `results/<key>.json` exists, reuse it and do not dispatch the worker again.
+8. If `moves/<key-sha256>.json` exists, reuse it and do not dispatch the worker again.
 9. Dispatch the worker with the frozen scope and key.
 10. Require worker progress reports on completion, unknown discovery, flag-worthy risk, and timed
     heartbeat. Ten minutes is a useful default for live long-running workers.
-11. Write the result once.
+11. Write the result once under `.okra/runs/<run-id>/moves/`.
 12. Read direct objective and anti-goal metrics from source and append to `ledger.jsonl`.
 13. Append a check-in record with worker progress refs, PKR signals, learning collected,
     process/context updates, and `next_check_at`.
@@ -85,8 +88,9 @@ metric freshness before rebuilding the next move. Never infer success from an ex
 ledger readings only if they satisfy the current metric contract, otherwise take a fresh direct read.
 
 Before promoting CKR/PKR candidates or resuming a worker lane, verify that the corresponding DKR
-learning checkpoint and worker progress reports exist. Missing learning evidence is a `cannot`
-signal, not permission to guess the remaining structure.
+learning checkpoint and worker progress reports exist. The checkpoint must state the decision target,
+evidence, probability/confidence update, and risk or anti-goal implications. Missing learning
+evidence is a `cannot` signal, not permission to guess the remaining structure.
 
 If the frame changed while a worker was running, do not commit that worker's result automatically.
 Record the worker output as evidence, re-run admissibility under the new frame, and either commit

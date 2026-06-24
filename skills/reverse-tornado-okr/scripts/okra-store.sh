@@ -10,6 +10,7 @@ Usage:
   okra-store.sh read-content <sha256> [store]
   okra-store.sh write-content <target> <source-file> [store]
   okra-store.sh worker-report <worker-id> <payload.json> [store]
+  okra-store.sh move-result <idempotency-key> <payload.json> [store]
   okra-store.sh append <ledger|flags|checkins> <payload.json> [store]
   okra-store.sh verify [store]
   okra-store.sh status [store]
@@ -208,12 +209,63 @@ cmd_worker_report() {
   append_record_path "$store/workers/$worker_id/progress.jsonl" "$payload"
 }
 
+cmd_move_result() {
+  local key="$1"
+  local payload="$2"
+  local store="${3:-.okra}"
+  if [ -z "$key" ]; then
+    printf 'idempotency key is required\n' >&2
+    exit 2
+  fi
+  test -f "$payload"
+  mkdir -p "$store/moves"
+  python3 - "$store" "$key" "$payload" <<'PY'
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+store = Path(sys.argv[1])
+key = sys.argv[2]
+payload_path = Path(sys.argv[3])
+
+payload = json.loads(payload_path.read_text(encoding="utf-8"))
+payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+record = {
+    "idempotency_key": key,
+    "key_sha256": key_hash,
+    "payload_sha256": payload_hash,
+    "committed_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "payload": payload,
+}
+dest = store / "moves" / f"{key_hash}.json"
+data = json.dumps(record, sort_keys=True, indent=2) + "\n"
+try:
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+except FileExistsError:
+    existing = json.loads(dest.read_text(encoding="utf-8"))
+    if existing.get("payload_sha256") != payload_hash:
+        print(f"idempotency conflict for key {key_hash}: existing payload differs", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(existing, sort_keys=True, indent=2))
+else:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(data)
+    print(json.dumps(record, sort_keys=True, indent=2))
+PY
+}
+
 cmd_verify() {
   local store="${1:-.okra}"
   python3 - "$store" <<'PY'
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -275,6 +327,26 @@ if content_dir.exists():
             if digest != path.name:
                 errors.append(f"content hash mismatch: {path}")
 
+moves = store / "moves"
+if moves.exists():
+    for path in sorted(moves.glob("*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            errors.append(f"{path}: invalid json: {exc}")
+            continue
+        key = record.get("idempotency_key")
+        payload = record.get("payload")
+        if not isinstance(key, str) or not key:
+            errors.append(f"{path}: missing idempotency_key")
+            continue
+        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        if path.stem != key_hash or record.get("key_sha256") != key_hash:
+            errors.append(f"{path}: idempotency key hash mismatch")
+        payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        if record.get("payload_sha256") != payload_hash:
+            errors.append(f"{path}: payload_sha256 mismatch")
+
 def hash_refs(value):
     if isinstance(value, dict):
         for key, child in value.items():
@@ -303,16 +375,35 @@ for path in log_paths:
             if not (content_dir / ref).is_file():
                 errors.append(f"{path}:{lineno}: missing referenced content hash: {ref}")
 
+def log_status_summary(path):
+    if not path.exists():
+        return 0, "-"
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lines:
+        return 0, "-"
+    try:
+        record = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return len(lines), "<invalid-json>"
+    return len(lines), str(record.get("record_hash", "-"))
+
+def status_row_present(text, name, count, last_hash):
+    pattern = rf"\|\s*{re.escape(name)}\s*\|\s*{count}\s*\|\s*`{re.escape(last_hash)}`\s*\|"
+    return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL) is not None
+
 status = store / "status.md"
-sources = [store / "ledger.jsonl", store / "flags.jsonl", store / "checkins.jsonl"]
-if workers.exists():
-    sources.extend(sorted(workers.glob("*/progress.jsonl")))
 if status.exists():
-    status_mtime = status.stat().st_mtime
-    for source in sources:
-        if source.exists() and source.stat().st_mtime > status_mtime:
-            errors.append(f"generated status is stale: {status}")
-            break
+    status_text = status.read_text(encoding="utf-8")
+    for name in ("ledger", "flags", "checkins"):
+        count, last_hash = log_status_summary(store / f"{name}.jsonl")
+        if not status_row_present(status_text, name, count, last_hash):
+            errors.append(f"generated status is stale for {name} log: {status}")
+    worker_count = 0
+    if workers.exists():
+        for source in sorted(workers.glob("*/progress.jsonl")):
+            worker_count += len([line for line in source.read_text(encoding="utf-8").splitlines() if line.strip()])
+    if not status_row_present(status_text, "worker progress", worker_count, "per-worker logs"):
+        errors.append(f"generated status is stale for worker progress logs: {status}")
 
 if errors:
     for error in errors:
@@ -397,6 +488,10 @@ main() {
     worker-report)
       [ "$#" -ge 2 ] || { usage; exit 2; }
       cmd_worker_report "$@"
+      ;;
+    move-result)
+      [ "$#" -ge 2 ] || { usage; exit 2; }
+      cmd_move_result "$@"
       ;;
     append)
       [ "$#" -ge 2 ] || { usage; exit 2; }

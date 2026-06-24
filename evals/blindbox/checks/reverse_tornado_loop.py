@@ -40,6 +40,13 @@ CHECKS = {
     ),
     "no-cascade direct metric rule is explicit": r"(no-cascade|scaffolding, not scoreboard|direct metric|direct reads?)",
     "DKR discovery unit is present": r"\bDKR\b[\s\S]{0,900}(discovery|probe|budget|learning)",
+    "DKR decision and risk intent is present": (
+        r"\bDKR\b[\s\S]{0,1200}"
+        r"(decision(?: target)?|decision[_ -]?target|decision to (?:unlock|unblock|improve)|"
+        r"steering decision|promotion decision|next steering decision|whether to|decide whether)"
+        r"[\s\S]{0,1200}"
+        r"(risk|anti[- ]goal|trap|safe|unsafe|guardrail|wall|veto|admissibility|harm|waste)"
+    ),
     "CKR contribution unit is measurable": r"\bCKR\b[\s\S]{0,900}(metric|measurable|target)",
     "PKR progression unit reaches tasks": r"\bPKRs?\b[\s\S]{0,900}(task|progression|do-and-check|execution)",
     "admissibility eval is before action": r"admissibility[\s\S]{0,900}(before|pre[- ]?dispatch|veto|admit)",

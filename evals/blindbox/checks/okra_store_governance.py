@@ -13,8 +13,15 @@ from typing import Any
 
 
 TARGET_ARTIFACT = Path("tasks/okra-governed-loop.md")
+TARGET_RUN_ID = "storage-governance"
 SOURCE_FILES = [Path("README.md"), Path("inputs/current-signals.md")]
 LOG_NAMES = ("ledger", "flags", "checkins")
+EXPECTED_FAIL_PATTERNS = {
+    "empty-worker-progress": r"empty worker progress report",
+    "flat-store": r"missing run-scoped OKRA store",
+    "missing-worker-progress": r"missing worker progress directory|missing worker progress reports",
+    "nonzero-anti-goal": r"ledger anti-goal metric is not zero",
+}
 
 
 def canonical_hash(value: Any) -> str:
@@ -194,6 +201,48 @@ def has_pattern(pattern: str, text: str) -> bool:
     return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL) is not None
 
 
+def load_json_object(path: Path, errors: list[str], label: str) -> dict[str, Any]:
+    if not path.exists():
+        errors.append(f"missing {label}: {display_path(path, path.parent.parent)}")
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"{display_path(path, path.parent.parent)}: invalid json: {exc}")
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"{display_path(path, path.parent.parent)}: {label} must be an object")
+        return {}
+    return value
+
+
+def check_frame_tree(store: Path, errors: list[str]) -> None:
+    frame = load_json_object(store / "frame" / "frame.v1.json", errors, "ratified frame")
+    tree = load_json_object(store / "tree" / "tree.v1.json", errors, "OKR tree")
+
+    frame_text = payload_text(frame)
+    if frame:
+        for key in ("frame_version", "objective", "anti_goals", "metric_contracts", "action_envelope"):
+            if key not in frame:
+                errors.append(f"frame missing {key}")
+        if "human_approval" not in frame_text and "ratified" not in frame_text:
+            errors.append("frame lacks human approval or ratification evidence")
+        if "frame_hash" not in frame:
+            errors.append("frame lacks frame_hash")
+        if not (store / "frame" / "current").exists():
+            errors.append("frame lacks frame/current pointer")
+
+    tree_text = payload_text(tree)
+    if tree:
+        for key in ("tree_version", "frame_version", "orchestrator", "dkrs", "ckrs", "pkrs"):
+            if key not in tree:
+                errors.append(f"tree missing {key}")
+        if "objective checks" not in tree_text or "subagent steering" not in tree_text:
+            errors.append("tree lacks orchestrator ownership of objective checks and subagent steering")
+        if not (store / "tree" / "current").exists():
+            errors.append("tree lacks tree/current pointer")
+
+
 def check_content_store(store: Path, records: dict[str, list[dict[str, Any]]], errors: list[str]) -> None:
     content_dir = content_dir_for_store(store)
     if not content_dir.is_dir():
@@ -217,7 +266,25 @@ def check_content_store(store: Path, records: dict[str, list[dict[str, Any]]], e
                     errors.append(f".okra/{name}.jsonl:{index}: missing referenced content hash: {ref}")
 
 
-def check_status(store: Path, errors: list[str], *, check_mtime: bool = True) -> None:
+def log_status_summary(path: Path) -> tuple[int, str]:
+    if not path.exists():
+        return 0, "-"
+    lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+    if not lines:
+        return 0, "-"
+    try:
+        record = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return len(lines), "<invalid-json>"
+    return len(lines), str(record.get("record_hash", "-"))
+
+
+def status_row_present(text: str, name: str, count: int, last_hash: str) -> bool:
+    pattern = rf"\|\s*{re.escape(name)}\s*\|\s*{count}\s*\|\s*`{re.escape(last_hash)}`\s*\|"
+    return has_pattern(pattern, text)
+
+
+def check_status(store: Path, errors: list[str]) -> None:
     status = store / "status.md"
     if not status.exists():
         errors.append("missing generated status: .okra/status.md")
@@ -227,19 +294,20 @@ def check_status(store: Path, errors: list[str], *, check_mtime: bool = True) ->
     if "Generated from append-only source records." not in text or "Do not edit it by hand." not in text:
         errors.append(".okra/status.md does not look like the generated helper status")
 
-    if check_mtime:
-        status_mtime = status.stat().st_mtime
-        for name in LOG_NAMES:
-            source = store / f"{name}.jsonl"
-            if source.exists() and source.stat().st_mtime > status_mtime:
-                errors.append(".okra/status.md is stale relative to append-only logs")
-                break
-        workers = store / "workers"
-        if workers.exists():
-            for source in workers.glob("*/progress.jsonl"):
-                if source.stat().st_mtime > status_mtime:
-                    errors.append(".okra/status.md is stale relative to worker progress logs")
-                    break
+    for name in LOG_NAMES:
+        count, last_hash = log_status_summary(store / f"{name}.jsonl")
+        if not status_row_present(text, name, count, last_hash):
+            errors.append(f".okra/status.md is stale for {name} log")
+
+    worker_count = 0
+    workers = store / "workers"
+    if workers.exists():
+        for source in workers.glob("*/progress.jsonl"):
+            worker_count += len(
+                [line for line in source.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+            )
+    if not status_row_present(text, "worker progress", worker_count, "per-worker logs"):
+        errors.append(".okra/status.md is stale for worker progress logs")
 
 
 def check_source_reads(workspace: Path, store: Path, checkins: list[dict[str, Any]], errors: list[str]) -> None:
@@ -344,6 +412,35 @@ def check_worker_progress(records: dict[str, list[dict[str, Any]]], errors: list
         errors.append("worker progress reports lack time-based next_report_at heartbeat")
 
 
+def check_move_results(store: Path, errors: list[str]) -> None:
+    moves = store / "moves"
+    if not moves.is_dir():
+        errors.append("missing idempotency move-results directory: .okra/runs/<run-id>/moves")
+        return
+    move_files = sorted(moves.glob("*.json"))
+    if not move_files:
+        errors.append("missing idempotency move result")
+        return
+    for path in move_files:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            errors.append(f"{display_path(path, store)}: invalid json: {exc}")
+            continue
+        key = record.get("idempotency_key")
+        payload = record.get("payload")
+        if not isinstance(key, str) or not key:
+            errors.append(f"{display_path(path, store)}: missing idempotency_key")
+            continue
+        key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        if path.stem != key_hash or record.get("key_sha256") != key_hash:
+            errors.append(f"{display_path(path, store)}: idempotency key hash mismatch")
+        if record.get("payload_sha256") != canonical_hash(payload):
+            errors.append(f"{display_path(path, store)}: payload_sha256 mismatch")
+        if "committed_at" not in record:
+            errors.append(f"{display_path(path, store)}: missing committed_at")
+
+
 def check_acceptance_evidence(records: dict[str, list[dict[str, Any]]], artifact_text: str, errors: list[str]) -> None:
     checkins = [
         record.get("payload")
@@ -399,17 +496,19 @@ def check_acceptance_evidence(records: dict[str, list[dict[str, Any]]], artifact
             errors.append(f"artifact missing {name}")
 
 
-def analyze_store(store: Path, *, check_status_mtime: bool = True) -> list[str]:
+def analyze_store(store: Path) -> list[str]:
     errors: list[str] = []
     workspace = workspace_for_store(store)
+    check_frame_tree(store, errors)
     records = {name: load_log(store, name, errors) for name in LOG_NAMES}
     records["worker_progress"] = load_worker_progress(store, errors)
     check_content_store(store, records, errors)
-    check_status(store, errors, check_mtime=check_status_mtime)
+    check_status(store, errors)
     check_source_reads(workspace, store, records.get("checkins", []), errors)
     check_final_write(workspace, store, records.get("checkins", []), errors)
     check_metric_and_checkin_records(records, errors)
     check_worker_progress(records, errors)
+    check_move_results(store, errors)
 
     artifact = workspace / TARGET_ARTIFACT
     artifact_text = artifact.read_text(encoding="utf-8", errors="replace") if artifact.exists() else ""
@@ -418,21 +517,23 @@ def analyze_store(store: Path, *, check_status_mtime: bool = True) -> list[str]:
 
 
 def candidate_stores(root: Path) -> list[Path]:
-    runs = root / "runs"
-    run_stores = sorted(child for child in runs.iterdir() if child.is_dir()) if runs.is_dir() else []
-    flat_has_records = any((root / f"{name}.jsonl").exists() for name in LOG_NAMES) or (root / "workers").exists()
-    if run_stores:
-        return ([root] if flat_has_records else []) + run_stores
-    return [root]
+    if root.parent.name == "runs":
+        return [root]
+    target = root / "runs" / TARGET_RUN_ID
+    return [target] if target.is_dir() else []
 
 
-def analyze(store: Path, *, check_status_mtime: bool = True) -> list[str]:
+def analyze(store: Path) -> list[str]:
     if not store.exists():
         return [f"missing store: {store}"]
     if not store.is_dir():
         return [f"store path is not a directory: {store}"]
 
-    errors_by_store = [(candidate, analyze_store(candidate, check_status_mtime=check_status_mtime)) for candidate in candidate_stores(store)]
+    candidates = candidate_stores(store)
+    if not candidates:
+        return [f"missing run-scoped OKRA store under {store / 'runs' / TARGET_RUN_ID}"]
+
+    errors_by_store = [(candidate, analyze_store(candidate)) for candidate in candidates]
     if any(not errors for _, errors in errors_by_store):
         return []
 
@@ -457,14 +558,20 @@ def calibrate(root: Path) -> int:
         failures.append(f"{root / 'fail'}: no failing golden workspaces")
 
     for workspace in pass_dirs:
-        errors = analyze(workspace / ".okra", check_status_mtime=False)
+        errors = analyze(workspace / ".okra")
         if errors:
             failures.append(f"{workspace}: expected pass, got: {', '.join(errors[:5])}")
 
     for workspace in fail_dirs:
-        errors = analyze(workspace / ".okra", check_status_mtime=False)
+        errors = analyze(workspace / ".okra")
         if not errors:
             failures.append(f"{workspace}: expected at least one store-governance violation, got pass")
+            continue
+        expected = EXPECTED_FAIL_PATTERNS.get(workspace.name)
+        if expected and not has_pattern(expected, "\n".join(errors)):
+            failures.append(
+                f"{workspace}: expected violation matching {expected!r}, got: {', '.join(errors[:5])}"
+            )
 
     if failures:
         print("okra store-governance calibration failed:", file=sys.stderr)

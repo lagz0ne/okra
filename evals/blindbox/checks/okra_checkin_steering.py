@@ -4,11 +4,27 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any
+
+
+TARGET_RUN_ID = "checkin-steering"
+EXPECTED_FAIL_PATTERNS = {
+    "budget-overrun": r"(DKR budget anti-goal is not zero|DKR progress exceeds budget)",
+    "flat-store": r"missing run-scoped OKRA store",
+    "low-health-rate": r"healthy_checkin_rate is below 0\.90",
+    "no-dkr-budget": r"ledger lacks DKR budget anti-goal read|DKR progress lacks explicit budget",
+    "no-pkr-signals": r"check-ins lack PKR progress signals",
+}
+
+
+def canonical_hash(value: Any) -> str:
+    data = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
 
 
 def payload_text(value: Any) -> str:
@@ -89,6 +105,21 @@ def metric_values(payload: Any, name_patterns: tuple[str, ...]) -> list[Any]:
     return values
 
 
+def require_zero_metric(
+    ledger: list[dict[str, Any]],
+    name_patterns: tuple[str, ...],
+    label: str,
+    errors: list[str],
+) -> None:
+    values: list[Any] = []
+    for payload in ledger:
+        values.extend(metric_values(payload, name_patterns))
+    if not values:
+        errors.append(f"ledger lacks anti-goal read: {label}")
+    elif not all(is_zero(value) for value in values):
+        errors.append(f"anti-goal metric is not zero: {label}")
+
+
 def numeric_at(payload: Any, names: set[str]) -> float | None:
     if isinstance(payload, dict):
         for key, value in payload.items():
@@ -105,56 +136,126 @@ def numeric_at(payload: Any, names: set[str]) -> float | None:
     return None
 
 
-def record_payload(line: str) -> dict[str, Any] | None:
+def record_payload(line: str, *, label: str, errors: list[str], expected_seq: int, prev: str) -> tuple[dict[str, Any] | None, str]:
     if not line.strip():
-        return None
+        return None, prev
     try:
         record = json.loads(line)
     except json.JSONDecodeError:
-        return None
+        errors.append(f"{label}: invalid json")
+        return None, prev
     if not isinstance(record, dict):
-        return None
-    payload = record.get("payload", record)
-    return payload if isinstance(payload, dict) else None
+        errors.append(f"{label}: record is not an object")
+        return None, prev
+
+    if record.get("seq") != expected_seq:
+        errors.append(f"{label}: expected seq {expected_seq}, got {record.get('seq')}")
+    if record.get("prev_hash") != prev:
+        errors.append(f"{label}: prev_hash mismatch")
+
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        errors.append(f"{label}: missing object payload")
+        return None, prev
+    if record.get("payload_sha256") != canonical_hash(payload):
+        errors.append(f"{label}: payload_sha256 mismatch")
+
+    without_hash = {key: value for key, value in record.items() if key != "record_hash"}
+    record_hash = canonical_hash(without_hash)
+    if record.get("record_hash") != record_hash:
+        errors.append(f"{label}: record_hash mismatch")
+    return payload, str(record.get("record_hash", ""))
 
 
-def load_payloads(path: Path) -> list[dict[str, Any]]:
+def load_payloads(path: Path, errors: list[str]) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     payloads: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        payload = record_payload(line)
+    prev = "GENESIS"
+    expected_seq = 1
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        if not line.strip():
+            continue
+        payload, prev = record_payload(
+            line,
+            label=f"{path}:{lineno}",
+            errors=errors,
+            expected_seq=expected_seq,
+            prev=prev,
+        )
+        expected_seq += 1
         if payload is not None:
             payloads.append(payload)
     return payloads
 
 
 def run_stores(root: Path) -> list[Path]:
-    runs = root / "runs"
-    if runs.is_dir():
-        stores = sorted(child for child in runs.iterdir() if child.is_dir())
-        if stores:
-            return stores
-    return []
+    target = root / "runs" / TARGET_RUN_ID
+    return [target] if target.is_dir() else []
 
 
 def has_pattern(pattern: str, text: str) -> bool:
     return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL) is not None
 
 
+def load_json_object(path: Path, errors: list[str], label: str) -> dict[str, Any]:
+    if not path.exists():
+        errors.append(f"missing {label}: {path}")
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"{path}: invalid json: {exc}")
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"{path}: {label} must be an object")
+        return {}
+    return value
+
+
+def check_frame_tree(store: Path, errors: list[str]) -> None:
+    frame = load_json_object(store / "frame" / "frame.v1.json", errors, "ratified frame")
+    tree = load_json_object(store / "tree" / "tree.v1.json", errors, "OKR tree")
+
+    frame_text = payload_text(frame)
+    if frame:
+        for key in ("frame_version", "objective", "anti_goals", "metric_contracts", "action_envelope"):
+            if key not in frame:
+                errors.append(f"frame missing {key}")
+        if "human_approval" not in frame_text and "ratified" not in frame_text:
+            errors.append("frame lacks human approval or ratification evidence")
+        if "frame_hash" not in frame:
+            errors.append("frame lacks frame_hash")
+        if not (store / "frame" / "current").exists():
+            errors.append("frame lacks frame/current pointer")
+
+    tree_text = payload_text(tree)
+    if tree:
+        for key in ("tree_version", "frame_version", "orchestrator", "dkrs", "ckrs", "pkrs"):
+            if key not in tree:
+                errors.append(f"tree missing {key}")
+        if "objective checks" not in tree_text or "subagent steering" not in tree_text:
+            errors.append("tree lacks orchestrator ownership of objective checks and subagent steering")
+        if not (store / "tree" / "current").exists():
+            errors.append("tree lacks tree/current pointer")
+
+
 def check_one_run(store: Path) -> list[str]:
     errors: list[str] = []
-    ledger = load_payloads(store / "ledger.jsonl")
-    checkins = load_payloads(store / "checkins.jsonl")
+    check_frame_tree(store, errors)
+    ledger = load_payloads(store / "ledger.jsonl", errors)
+    checkins = load_payloads(store / "checkins.jsonl", errors)
+    flags = load_payloads(store / "flags.jsonl", errors)
     worker_payloads: list[dict[str, Any]] = []
     workers = store / "workers"
     if workers.exists():
         for path in sorted(workers.glob("*/progress.jsonl")):
-            worker_payloads.extend(load_payloads(path))
+            worker_payloads.extend(load_payloads(path, errors))
 
-    all_text = "\n".join(payload_text(payload) for payload in ledger + checkins + worker_payloads)
+    all_text = "\n".join(payload_text(payload) for payload in ledger + checkins + flags + worker_payloads)
     ledger_text = "\n".join(payload_text(payload) for payload in ledger)
     checkin_text = "\n".join(payload_text(payload) for payload in checkins)
+    flags_text = "\n".join(payload_text(payload) for payload in flags)
     worker_text = "\n".join(payload_text(payload) for payload in worker_payloads)
 
     health_values: list[Any] = []
@@ -192,6 +293,36 @@ def check_one_run(store: Path) -> list[str]:
     elif not dkr_budget_values and not any(is_zero(payload.get("value")) for payload in legacy_budget_reads):
         errors.append("DKR budget anti-goal is not zero")
 
+    require_zero_metric(
+        ledger,
+        ("unsteered_worker_edge_count", "unsteered_worker_edge"),
+        "unsteered_worker_edge_count",
+        errors,
+    )
+    require_zero_metric(
+        ledger,
+        ("no_progress_loop_continuation_count", "no_progress_loop_continuation"),
+        "no_progress_loop_continuation_count",
+        errors,
+    )
+
+    if not flags:
+        errors.append("missing flag lifecycle records")
+    else:
+        for pattern, label in (
+            (r"\bcannot\b", "cannot"),
+            (r"\bbreaking\b", "breaking"),
+            (r"\bpointless\b", "pointless"),
+            (r"\bauthority[_ -]?drift\b", "authority drift"),
+        ):
+            if not has_pattern(pattern, flags_text):
+                errors.append(f"flag lifecycle lacks {label} flag class")
+        for state in ("open", "acknowledged", "resolved", "waived"):
+            if not has_pattern(rf"\b{state}\b", flags_text):
+                errors.append(f"flag lifecycle lacks {state} state")
+        if not has_pattern(r"\b(pause|stop|blocked|resume)\b", flags_text):
+            errors.append("flag lifecycle lacks pause/stop/resume behavior")
+
     if not checkins:
         errors.append("missing steering check-in records")
     if len(checkins) < 2:
@@ -221,6 +352,21 @@ def check_one_run(store: Path) -> list[str]:
         errors.append("DKR progress lacks explicit budget")
     if dkr_payloads and not has_pattern(r"\b(spent|remaining|used|turn_budget|max_turns|time_budget)\b", dkr_text):
         errors.append("DKR progress lacks spent/remaining budget state")
+    if dkr_payloads and not has_pattern(
+        r"\b(decision(?: target)?|decision[_ -]?target|decision to (?:unlock|unblock|improve)|"
+        r"steering decision|promotion decision|next steering decision|"
+        r"whether to (?:promote|fund|spawn|continue|pause|admit|veto|re-aim|reaim)|"
+        r"decide whether to (?:promote|fund|spawn|continue|pause|admit|veto|re-aim|reaim))\b",
+        dkr_text,
+    ):
+        errors.append("DKR progress lacks decision target/unlock")
+    if dkr_payloads and not has_pattern(
+        r"\b(risk(?: if skipped)?|risk_if_skipped|anti[- ]goal uncertainty|anti[- ]goal risk|"
+        r"guardrail uncertainty|trap|traps|safe|safety|unsafe|harm|wall|veto|admissibility|"
+        r"avoid wasting|not wasting|waste)\b",
+        dkr_text,
+    ):
+        errors.append("DKR progress lacks risk or anti-goal uncertainty")
     if dkr_payloads and not has_pattern(r"\b(learning|evidence|answered|unanswered)\b", dkr_text):
         errors.append("DKR progress lacks learning/evidence content")
     if dkr_payloads and not has_pattern(r"\b(probability|confidence|posterior|prior)\b", dkr_text):
@@ -274,7 +420,7 @@ def analyze(root: Path) -> list[str]:
         return [f"missing store: {root}"]
     stores = run_stores(root)
     if not stores:
-        return ["missing run-scoped OKRA store under .okra/runs/<run-id>"]
+        return [f"missing run-scoped OKRA store under .okra/runs/{TARGET_RUN_ID}"]
 
     errors_by_run = [(store, check_one_run(store)) for store in stores]
     if any(not errors for _, errors in errors_by_run):
@@ -308,6 +454,12 @@ def calibrate(root: Path) -> int:
         errors = analyze(workspace / ".okra")
         if not errors:
             failures.append(f"{workspace}: expected at least one check-in steering violation, got pass")
+            continue
+        expected = EXPECTED_FAIL_PATTERNS.get(workspace.name)
+        if expected and not has_pattern(expected, "\n".join(errors)):
+            failures.append(
+                f"{workspace}: expected violation matching {expected!r}, got: {', '.join(errors[:5])}"
+            )
 
     if failures:
         print("okra check-in steering calibration failed:", file=sys.stderr)

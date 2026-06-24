@@ -39,14 +39,13 @@ workers, moves, drafts, and generated status.
         current
       drafts/
       moves/
-        <idempotency-key>.json
+        <key-sha256>.json
       workers/
         <worker-id>/progress.jsonl
       ledger.jsonl
       flags.jsonl
       checkins.jsonl
       status.md
-      manifest.sha256
 ```
 
 For a single lightweight run, the helper still supports the legacy flat `.okra/ledger.jsonl` layout.
@@ -61,19 +60,18 @@ Authoritative records:
 - `.okra/runs/<run-id>/tree/*.json`: versioned DKR/CKR/PKR structure and worker scopes.
 - `.okra/content/sha256/<hash>`: prompts, artifacts, worker outputs, review notes, and other important
   content addressed by SHA-256.
-- `.okra/runs/<run-id>/moves/<idempotency-key>.json`: write-once committed move outcomes.
+- `.okra/runs/<run-id>/moves/<key-sha256>.json`: write-once committed move outcomes. Each file
+  records the full `idempotency_key`, `key_sha256`, `payload_sha256`, committed timestamp, and payload.
 - `.okra/runs/<run-id>/workers/<worker-id>/progress.jsonl`: append-only worker progress reports for DKR and PKR
   subagents.
 - `.okra/runs/<run-id>/ledger.jsonl`: append-only objective, CKR, and anti-goal metric reads.
 - `.okra/runs/<run-id>/flags.jsonl`: append-only flag lifecycle records.
 - `.okra/runs/<run-id>/checkins.jsonl`: append-only check-in records.
 
-Generated records:
+Generated view:
 
-- `.okra/runs/<run-id>/status.md`: generated from frame, tree, ledger, check-ins, flags, and moves.
-  Do not edit it by hand or treat it as authority.
-- `.okra/runs/<run-id>/manifest.sha256`: generated verification summary when the run store is
-  checked.
+- `.okra/runs/<run-id>/status.md`: generated from append-only source records. Do not edit it by
+  hand or treat it as authority.
 
 ## Append-Only Log Contract
 
@@ -140,7 +138,8 @@ A useful check-in payload includes:
 PKR signals should include off-track work, quality drift, churn, late discovery, stale metrics, and
 scope or authority concerns.
 
-DKR learning checkpoints should include evidence collected, questions answered/unanswered,
+DKR learning checkpoints should include the steering decision the probe is meant to unlock, the risk
+or anti-goal uncertainty it is reducing, evidence collected, questions answered/unanswered,
 probability or confidence changes, candidate CKRs, and remaining unknowns. The orchestrator should
 not promote CKR or PKR candidates until such a checkpoint is accepted.
 
@@ -181,15 +180,19 @@ as content, then gather deterministic evidence or an independent review.
 The optional helper `scripts/okra-store.sh` creates and checks this layout:
 
 ```sh
-skills/reverse-tornado-okr/scripts/okra-store.sh init .okra
-run_store="$(skills/reverse-tornado-okr/scripts/okra-store.sh init-run onboarding-activation .okra)"
-skills/reverse-tornado-okr/scripts/okra-store.sh put path/to/artifact.md "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh read-content <sha256> "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh write-content tasks/loop.md "$run_store/drafts/loop.md" "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh worker-report dkr-1 progress.json "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh append checkins payload.json "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh verify "$run_store"
-skills/reverse-tornado-okr/scripts/okra-store.sh status "$run_store"
+helper=".codex/skills/reverse-tornado-okr/scripts/okra-store.sh"
+test -x "$helper" || helper=".claude/skills/reverse-tornado-okr/scripts/okra-store.sh"
+
+"$helper" init .okra
+run_store="$("$helper" init-run onboarding-activation .okra)"
+"$helper" put path/to/artifact.md "$run_store"
+"$helper" read-content <sha256> "$run_store"
+"$helper" write-content tasks/loop.md "$run_store/drafts/loop.md" "$run_store"
+"$helper" move-result <idempotency-key> move-result.json "$run_store"
+"$helper" worker-report dkr-1 progress.json "$run_store"
+"$helper" append checkins payload.json "$run_store"
+"$helper" verify "$run_store"
+"$helper" status "$run_store"
 ```
 
 The helper is deliberately small. It is not a database. Its job is to make integrity easy enough

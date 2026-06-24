@@ -53,6 +53,8 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ),
 )
 STRUCTURED_CREDENTIAL_EXTS = {".json", ".toml", ".yaml", ".yml", ".env", ".ini", ".conf", ".config", ".properties"}
+TRANSCRIPT_CREDENTIAL_EXTS = {".md", ".log", ".txt"}
+SNAPSHOT_EXCLUDED_DIRS = {".git", "__pycache__"}
 
 
 class RunnerError(RuntimeError):
@@ -130,6 +132,28 @@ def sha256_path(path: Path) -> str:
             continue
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def workspace_snapshot(workspace: Path) -> dict[str, str]:
+    """Hash workspace files without trusting mutable Git state."""
+    hashes: dict[str, str] = {}
+    for child in sorted(workspace.rglob("*")):
+        rel = child.relative_to(workspace)
+        if any(part in SNAPSHOT_EXCLUDED_DIRS for part in rel.parts):
+            continue
+        if child.is_file() or child.is_symlink():
+            hashes[rel.as_posix()] = sha256_path(child)
+    return hashes
+
+
+def snapshot_changed_paths(workspace: Path, baseline: dict[str, str]) -> list[str]:
+    current = workspace_snapshot(workspace)
+    paths = {
+        path
+        for path in set(baseline) | set(current)
+        if baseline.get(path) != current.get(path)
+    }
+    return sorted(paths)
 
 
 def validate_relative_path(value: Any, *, label: str) -> str | None:
@@ -306,6 +330,53 @@ def validate_project_skill_links() -> list[str]:
     return errors
 
 
+def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
+    helper = skill_path() / "scripts" / "okra-store.sh"
+    print_cmd([str(helper), "move-result", "<idempotency-key>", "<payload.json>", "<store>"])
+    if dry_run:
+        return 0
+
+    with tempfile.TemporaryDirectory(prefix="okra-store-helper-") as tmp:
+        root = Path(tmp)
+        payload_a = root / "move-a.json"
+        payload_b = root / "move-b.json"
+        payload_a.write_text('{"type":"move","value":1}\n', encoding="utf-8")
+        payload_b.write_text('{"type":"move","value":2}\n', encoding="utf-8")
+
+        def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                cmd,
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=10,
+            )
+
+        init = run([str(helper), "init", ".okra"])
+        if init.returncode:
+            print(init.stdout, file=sys.stderr)
+            return 1
+        init_run = run([str(helper), "init-run", "smoke", ".okra"])
+        if init_run.returncode:
+            print(init_run.stdout, file=sys.stderr)
+            return 1
+        run_store = init_run.stdout.strip().splitlines()[-1]
+        key = "smoke/frame/hash/node/write/scope/input"
+
+        first = run([str(helper), "move-result", key, str(payload_a), run_store])
+        replay = run([str(helper), "move-result", key, str(payload_a), run_store])
+        conflict = run([str(helper), "move-result", key, str(payload_b), run_store])
+        verify = run([str(helper), "verify", run_store])
+
+        if first.returncode or replay.returncode or conflict.returncode == 0 or verify.returncode:
+            print("okra-store helper move-result smoke failed", file=sys.stderr)
+            for label, proc in (("first", first), ("replay", replay), ("conflict", conflict), ("verify", verify)):
+                print(f"{label}: exit {proc.returncode}\n{proc.stdout}", file=sys.stderr)
+            return 1
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     failures = 0
     for path in sorted((REPO_ROOT / "skills").iterdir()):
@@ -360,6 +431,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
         [sys.executable, "-m", "py_compile", str(REPO_ROOT / "scripts" / "okr-runner.py")],
         dry_run=args.dry_run,
     )
+    failures += run_checked(
+        ["bash", "-n", str(skill_path() / "scripts" / "okra-store.sh")],
+        dry_run=args.dry_run,
+    )
+    failures += validate_store_helper_behavior(dry_run=args.dry_run)
 
     case_errors = validate_cases()
     for error in case_errors:
@@ -387,13 +463,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         path = shutil.which(name) or "-"
         print(f"{name}: {status} {path}")
     if args.check_bwrap and command_exists("bwrap"):
-        with tempfile.TemporaryDirectory(prefix="okr-bwrap-workspace-") as workspace_tmp, tempfile.TemporaryDirectory(
-            prefix="okr-bwrap-run-"
-        ) as run_tmp:
-            workspace = Path(workspace_tmp)
-            run_dir = Path(run_tmp)
-            (run_dir / "home").mkdir(parents=True, exist_ok=True)
-            (run_dir / "cache").mkdir(parents=True, exist_ok=True)
+        if args.dry_run:
+            workspace = Path("/tmp/okr-bwrap-dry-workspace")
+            run_dir = Path("/tmp/okr-bwrap-dry-run")
             code = run_checked(
                 bwrap_prefix(workspace, run_dir)
                 + [
@@ -401,8 +473,26 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     "-c",
                     f"test -r /etc/resolv.conf && test ! -e {shlex.quote(str(REPO_ROOT / 'evals'))}",
                 ],
-                dry_run=args.dry_run,
+                dry_run=True,
             )
+        else:
+            with tempfile.TemporaryDirectory(prefix="okr-bwrap-workspace-") as workspace_tmp, tempfile.TemporaryDirectory(
+                prefix="okr-bwrap-run-"
+            ) as run_tmp:
+                workspace = Path(workspace_tmp)
+                run_dir = Path(run_tmp)
+                (run_dir / "home").mkdir(parents=True, exist_ok=True)
+                (run_dir / "cache").mkdir(parents=True, exist_ok=True)
+                (run_dir / "agent-output").mkdir(parents=True, exist_ok=True)
+                code = run_checked(
+                    bwrap_prefix(workspace, run_dir)
+                    + [
+                        "/usr/bin/sh",
+                        "-c",
+                        f"test -r /etc/resolv.conf && test ! -e {shlex.quote(str(REPO_ROOT / 'evals'))}",
+                    ],
+                    dry_run=False,
+                )
         if code:
             missing.append("bwrap-smoke")
     return 1 if missing else 0
@@ -543,13 +633,17 @@ def prepare_claude_home(run_dir: Path) -> None:
     (run_dir / "cache").mkdir(parents=True, exist_ok=True)
 
 
-def scrub_secret_placeholders(run_dir: Path) -> None:
+def scrub_runtime_state(run_dir: Path) -> None:
     for path in (
         run_dir / "codex-home" / "auth.json",
         run_dir / "home" / ".claude" / ".credentials.json",
     ):
         if path.exists():
             path.unlink()
+    for dirname in ("home", "cache", "codex-home", "agent-output"):
+        path = run_dir / dirname
+        if path.exists():
+            shutil.rmtree(path)
 
 
 def build_case_prompt(case: dict[str, Any], workspace_root: str) -> str:
@@ -587,6 +681,14 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
         BWRAP_WORKSPACE,
         "--dir",
         BWRAP_RUNS,
+        "--dir",
+        f"{BWRAP_RUNS}/home",
+        "--dir",
+        f"{BWRAP_RUNS}/cache",
+        "--dir",
+        f"{BWRAP_RUNS}/agent-output",
+        "--dir",
+        f"{BWRAP_RUNS}/codex-home",
         "--ro-bind",
         "/usr",
         "/usr",
@@ -620,23 +722,29 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
         "--dir",
         host_home,
         "--ro-bind-try",
-        f"{host_home}/.local",
-        f"{host_home}/.local",
+        f"{host_home}/.local/bin",
+        f"{host_home}/.local/bin",
         "--ro-bind-try",
-        f"{host_home}/.cargo",
-        f"{host_home}/.cargo",
+        f"{host_home}/.local/share/mise",
+        f"{host_home}/.local/share/mise",
         "--ro-bind-try",
-        f"{host_home}/.bun",
-        f"{host_home}/.bun",
-        "--ro-bind-try",
-        f"{host_home}/go",
-        f"{host_home}/go",
+        f"{host_home}/.local/share/claude",
+        f"{host_home}/.local/share/claude",
         "--bind",
         str(workspace),
         BWRAP_WORKSPACE,
         "--bind",
-        str(run_dir),
-        BWRAP_RUNS,
+        str(run_dir / "home"),
+        f"{BWRAP_RUNS}/home",
+        "--bind",
+        str(run_dir / "cache"),
+        f"{BWRAP_RUNS}/cache",
+        "--bind",
+        str(run_dir / "agent-output"),
+        f"{BWRAP_RUNS}/agent-output",
+        "--bind-try",
+        str(run_dir / "codex-home"),
+        f"{BWRAP_RUNS}/codex-home",
     ]
     if agent == "codex":
         cmd += [
@@ -705,7 +813,7 @@ def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
         ]
         if model:
             cmd += ["--model", model]
-        cmd += ["-o", f"{runs_root}/artifacts/final.md", "-"]
+        cmd += ["-o", f"{runs_root}/agent-output/final.md", "-"]
         return cmd
     if agent == "claude":
         cmd = [
@@ -748,6 +856,8 @@ def run_agent_case(
 ) -> int:
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
+    agent_output = run_dir / "agent-output"
+    agent_output.mkdir(parents=True, exist_ok=True)
     if agent == "codex":
         prepare_codex_home(run_dir)
     elif agent == "claude":
@@ -764,18 +874,24 @@ def run_agent_case(
         stdin = prompt
         log_path = artifacts / "agent.log"
 
-    code = run_logged(
-        cmd,
-        cwd=workspace,
-        log_path=log_path,
-        stdin=stdin,
-        dry_run=dry_run,
-        timeout=timeout,
-    )
-    scrub_secret_placeholders(run_dir)
-    if dry_run:
-        return 0
-    return code
+    try:
+        code = run_logged(
+            cmd,
+            cwd=workspace,
+            log_path=log_path,
+            stdin=stdin,
+            dry_run=dry_run,
+            timeout=timeout,
+        )
+        if agent == "codex" and not dry_run:
+            final_output = agent_output / "final.md"
+            if final_output.exists():
+                shutil.copy2(final_output, artifacts / "final.md")
+        if dry_run:
+            return 0
+        return code
+    finally:
+        scrub_runtime_state(run_dir)
 
 
 def git_changed_paths(workspace: Path) -> list[str]:
@@ -806,8 +922,12 @@ def is_allowed_changed_path(path: str, allowed_paths: list[str]) -> bool:
     return False
 
 
-def evaluate_allowed_paths(workspace: Path, allowed_paths: list[str]) -> dict[str, Any]:
-    changed = git_changed_paths(workspace)
+def evaluate_allowed_paths(
+    workspace: Path,
+    allowed_paths: list[str],
+    baseline: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    changed = snapshot_changed_paths(workspace, baseline) if baseline is not None else git_changed_paths(workspace)
     unexpected = [path for path in changed if not is_allowed_changed_path(path, allowed_paths)]
     if unexpected:
         detail = "unexpected changes: " + ", ".join(unexpected)
@@ -836,8 +956,16 @@ def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
             findings.append(f"{rel}: auth placeholder still preserved")
             continue
         try:
+            size = path.stat().st_size
+        except OSError as exc:
+            findings.append(f"{rel}: unreadable during credential audit: {exc}")
+            continue
+        if size > MAX_SECRET_SCAN_BYTES:
+            findings.append(f"{rel}: exceeds credential scan limit ({size} bytes)")
+            continue
+        try:
             with path.open("rb") as handle:
-                data = handle.read(MAX_SECRET_SCAN_BYTES)
+                data = handle.read()
         except OSError as exc:
             findings.append(f"{rel}: unreadable during credential audit: {exc}")
             continue
@@ -845,6 +973,7 @@ def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
             if (
                 name == "credential_field"
                 and path.suffix.lower() not in STRUCTURED_CREDENTIAL_EXTS
+                and path.suffix.lower() not in TRANSCRIPT_CREDENTIAL_EXTS
                 and path.name not in {".env"}
             ):
                 continue
@@ -904,9 +1033,10 @@ def evaluate_agent_execution(agent: str, run_dir: Path, code: int) -> dict[str, 
     }
 
 
-def changed_path_hashes(workspace: Path) -> dict[str, str]:
+def changed_path_hashes(workspace: Path, baseline: dict[str, str] | None = None) -> dict[str, str]:
     hashes: dict[str, str] = {}
-    for rel in git_changed_paths(workspace):
+    changed_paths = snapshot_changed_paths(workspace, baseline) if baseline is not None else git_changed_paths(workspace)
+    for rel in changed_paths:
         path = workspace / rel
         if path.exists():
             hashes[rel] = sha256_path(path)
@@ -915,7 +1045,7 @@ def changed_path_hashes(workspace: Path) -> dict[str, str]:
     return hashes
 
 
-def output_hashes(run_dir: Path, workspace: Path) -> dict[str, Any]:
+def output_hashes(run_dir: Path, workspace: Path, baseline: dict[str, str] | None = None) -> dict[str, Any]:
     artifacts = run_dir / "artifacts"
     artifact_files: dict[str, str] = {}
     if artifacts.exists():
@@ -925,7 +1055,7 @@ def output_hashes(run_dir: Path, workspace: Path) -> dict[str, Any]:
         "run_tree_sha256_before_result": sha256_path(run_dir),
         "artifacts_tree_sha256": sha256_path(artifacts) if artifacts.exists() else "missing",
         "workspace_tree_sha256": sha256_path(workspace),
-        "changed_paths_sha256": changed_path_hashes(workspace),
+        "changed_paths_sha256": changed_path_hashes(workspace, baseline),
         "artifact_files_sha256": artifact_files,
     }
 
@@ -1116,30 +1246,52 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
     failures = 0
     for case in cases:
         for agent in agents_from_arg(args.agent):
-            if not command_exists(agent):
+            if not command_exists(agent) and not args.dry_run:
                 print(f"missing agent CLI: {agent}", file=sys.stderr)
+                failures += 1
+                continue
+            if not args.dry_run and requested_model(agent) is None:
+                print(f"missing explicit model for scored run: set {model_env_name(agent)}", file=sys.stderr)
                 failures += 1
                 continue
             run_name = f"{timestamp()}-{slug(case['id'])}-{agent}"
             run_dir = RUN_ROOT / "blindbox" / run_name
             workspace = prepare_workspace(case, run_dir)
+            baseline_snapshot = workspace_snapshot(workspace)
             workspace_root = BWRAP_WORKSPACE if args.isolation == "bwrap" else str(workspace)
             prompt = build_case_prompt(case, workspace_root)
-            code = run_agent_case(
-                agent=agent,
-                case=case,
-                run_dir=run_dir,
-                workspace=workspace,
-                prompt=prompt,
-                isolation=args.isolation,
-                dry_run=args.dry_run,
-                timeout=args.timeout,
-            )
-            checks = [] if args.dry_run else [evaluate_agent_execution(agent, run_dir, code)]
-            if not args.dry_run:
-                checks.extend(evaluate_checks(workspace, case["checks"]))
-                checks.append(evaluate_allowed_paths(workspace, case["allowed_paths"]))
-                checks.append(evaluate_credential_artifacts(run_dir))
+            runner_error = ""
+            try:
+                code = run_agent_case(
+                    agent=agent,
+                    case=case,
+                    run_dir=run_dir,
+                    workspace=workspace,
+                    prompt=prompt,
+                    isolation=args.isolation,
+                    dry_run=args.dry_run,
+                    timeout=args.timeout,
+                )
+                checks = [] if args.dry_run else [evaluate_agent_execution(agent, run_dir, code)]
+                if not args.dry_run:
+                    checks.extend(evaluate_checks(workspace, case["checks"]))
+                    checks.append(evaluate_allowed_paths(workspace, case["allowed_paths"], baseline_snapshot))
+                    checks.append(evaluate_credential_artifacts(run_dir))
+            except KeyboardInterrupt:
+                code = 130
+                runner_error = "runner interrupted; runtime scratch scrubbed and partial result written"
+                scrub_runtime_state(run_dir)
+                checks = [
+                    {
+                        "type": "agent_execution",
+                        "path": str(run_dir / "artifacts"),
+                        "passed": False,
+                        "detail": runner_error,
+                        "exit_code": code,
+                    },
+                    evaluate_allowed_paths(workspace, case["allowed_paths"], baseline_snapshot),
+                    evaluate_credential_artifacts(run_dir),
+                ]
             result = {
                 "case": case["id"],
                 "agent": agent,
@@ -1159,13 +1311,16 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 ),
                 "agent_version": tool_version(agent),
                 "input_hashes": input_hashes(case, prompt),
-                "output_hashes": {} if args.dry_run else output_hashes(run_dir, workspace),
+                "output_hashes": {} if args.dry_run else output_hashes(run_dir, workspace, baseline_snapshot),
                 "credential_policy": (
                     "agent auth file mounted read-only when required; sandbox env is cleared before "
-                    "agent launch; preserved run artifacts are scanned for known credential patterns"
+                    "agent launch; runtime home/cache/output scratch directories are scrubbed after "
+                    "the agent exits; preserved run artifacts are scanned for known credential patterns; "
+                    "runtime scratch containment is deletion, not post-scrub audit coverage"
                 ),
                 "exit_code": code,
                 "dry_run": args.dry_run,
+                "runner_error": runner_error,
                 "checks": checks,
             }
             write_result(run_dir, result)
@@ -1179,6 +1334,8 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
             if failed_checks:
                 for check in failed_checks:
                     print(f"  check failed: {check['type']} {check.get('path')}: {check['detail']}")
+            if runner_error:
+                return 130
             if failures and not keep_going:
                 return 1
     return 1 if failures else 0
