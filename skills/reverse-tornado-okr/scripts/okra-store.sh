@@ -6,11 +6,14 @@ usage() {
 Usage:
   okra-store.sh init [store]
   okra-store.sh init-run <run-id> [store]
+  okra-store.sh write-frame <frame.json> [store]
+  okra-store.sh write-tree <tree.json> [store]
   okra-store.sh put <file> [store]
   okra-store.sh read-content <sha256> [store]
   okra-store.sh write-content <target> <source-file> [store]
   okra-store.sh worker-report <worker-id> <payload.json> [store]
   okra-store.sh move-result <idempotency-key> <payload.json> [store]
+  okra-store.sh metric-read <payload.json> [store]
   okra-store.sh append <ledger|flags|checkins> <payload.json> [store]
   okra-store.sh verify [store]
   okra-store.sh status [store]
@@ -75,6 +78,77 @@ cmd_init_run() {
   mkdir -p "$run_store/frame" "$run_store/tree" "$run_store/moves" "$run_store/workers" "$run_store/drafts"
   touch "$run_store/ledger.jsonl" "$run_store/flags.jsonl" "$run_store/checkins.jsonl"
   printf '%s\n' "$run_store"
+}
+
+write_versioned_json() {
+  local kind="$1"
+  local source="$2"
+  local store="$3"
+  test -f "$source"
+  mkdir -p "$store/$kind"
+  python3 - "$kind" "$source" "$store" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+kind = sys.argv[1]
+source = Path(sys.argv[2])
+store = Path(sys.argv[3])
+value = json.loads(source.read_text(encoding="utf-8"))
+if not isinstance(value, dict):
+    print(f"{kind} json must be an object", file=sys.stderr)
+    raise SystemExit(2)
+
+text = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).lower()
+errors = []
+if kind == "frame":
+    required = ("frame_version", "frame_hash", "objective", "anti_goals", "metric_contracts", "action_envelope")
+    for key in required:
+        if key not in value:
+            errors.append(f"frame missing {key}")
+    if "human_approval" not in text and "ratified" not in text:
+        errors.append("frame lacks human approval or ratification evidence")
+elif kind == "tree":
+    required = ("tree_version", "frame_version", "orchestrator", "dkrs", "ckrs", "pkrs")
+    for key in required:
+        if key not in value:
+            errors.append(f"tree missing {key}")
+    if "objective checks" not in text:
+        errors.append("tree orchestrator entry must include objective checks")
+    if "subagent steering" not in text:
+        errors.append("tree orchestrator entry must include subagent steering")
+else:
+    errors.append(f"unknown versioned json kind: {kind}")
+
+if errors:
+    for error in errors:
+        print(error, file=sys.stderr)
+    raise SystemExit(2)
+
+dest = store / kind / f"{kind}.v1.json"
+data = json.dumps(value, sort_keys=True, indent=2) + "\n"
+if dest.exists():
+    if dest.read_text(encoding="utf-8") != data:
+        print(f"{dest}: refusing to overwrite existing {kind}.v1.json with different content", file=sys.stderr)
+        raise SystemExit(1)
+else:
+    dest.write_text(data, encoding="utf-8")
+(store / kind / "current").write_text(dest.name + "\n", encoding="utf-8")
+print(hashlib.sha256(dest.read_bytes()).hexdigest())
+PY
+}
+
+cmd_write_frame() {
+  local source="$1"
+  local store="${2:-.okra}"
+  write_versioned_json "frame" "$source" "$store"
+}
+
+cmd_write_tree() {
+  local source="$1"
+  local store="${2:-.okra}"
+  write_versioned_json "tree" "$source" "$store"
 }
 
 cmd_put() {
@@ -259,6 +333,51 @@ else:
 PY
 }
 
+cmd_metric_read() {
+  local payload="$1"
+  local store="${2:-.okra}"
+  test -f "$payload"
+  python3 - "$payload" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+value = json.loads(path.read_text(encoding="utf-8"))
+if not isinstance(value, dict):
+    print("metric-read payload must be an object", file=sys.stderr)
+    raise SystemExit(2)
+
+record_type = str(value.get("type") or value.get("record_type") or value.get("event") or "").lower()
+allowed_types = {
+    "metric_read",
+    "direct_metric_read",
+    "objective_metric_read",
+    "objective_read",
+    "anti_goal_metric_read",
+    "anti_goal_read",
+}
+errors = []
+if record_type not in allowed_types:
+    errors.append("metric-read payload needs type=metric_read, objective_metric_read, or anti_goal_metric_read")
+if "metric_id" not in value and "metric" not in value:
+    errors.append("metric-read payload needs metric_id or metric")
+if "value" not in value:
+    errors.append("metric-read payload needs value")
+for key in ("observed_at", "source", "freshness"):
+    if key not in value:
+        errors.append(f"metric-read payload needs {key}")
+payload_text = json.dumps(value, sort_keys=True).lower()
+if not ("objective" in payload_text or "anti_goal" in payload_text or "anti-goal" in payload_text or "ckr" in payload_text):
+    errors.append("metric-read payload must identify objective, CKR, or anti-goal metric kind")
+if errors:
+    for error in errors:
+        print(error, file=sys.stderr)
+    raise SystemExit(2)
+PY
+  cmd_append "ledger" "$payload" "$store"
+}
+
 cmd_verify() {
   local store="${1:-.okra}"
   python3 - "$store" <<'PY'
@@ -279,6 +398,56 @@ def content_dir_for(store):
 
 def canonical_hash(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+def payload_text(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).lower()
+
+def load_json_object(path, label):
+    if not path.exists():
+        errors.append(f"missing {label}: {path}")
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"{path}: invalid json: {exc}")
+        return None
+    if not isinstance(value, dict):
+        errors.append(f"{path}: {label} must be an object")
+        return None
+    return value
+
+def verify_frame_tree():
+    require_frame_tree = (
+        store.parent.name == "runs"
+        or (store / "frame" / "frame.v1.json").exists()
+        or (store / "tree" / "tree.v1.json").exists()
+    )
+    if not require_frame_tree:
+        return
+
+    frame = load_json_object(store / "frame" / "frame.v1.json", "ratified frame")
+    tree = load_json_object(store / "tree" / "tree.v1.json", "OKR tree")
+
+    if frame is not None:
+        for key in ("frame_version", "frame_hash", "objective", "anti_goals", "metric_contracts", "action_envelope"):
+            if key not in frame:
+                errors.append(f"frame missing {key}")
+        if "human_approval" not in payload_text(frame) and "ratified" not in payload_text(frame):
+            errors.append("frame lacks human approval or ratification evidence")
+        if not (store / "frame" / "current").exists():
+            errors.append("frame lacks frame/current pointer")
+
+    if tree is not None:
+        tree_text = payload_text(tree)
+        for key in ("tree_version", "frame_version", "orchestrator", "dkrs", "ckrs", "pkrs"):
+            if key not in tree:
+                errors.append(f"tree missing {key}")
+        if "objective checks" not in tree_text:
+            errors.append("tree lacks orchestrator ownership of objective checks")
+        if "subagent steering" not in tree_text:
+            errors.append("tree lacks orchestrator ownership of subagent steering")
+        if not (store / "tree" / "current").exists():
+            errors.append("tree lacks tree/current pointer")
 
 def verify_log_path(path):
     if not path.exists():
@@ -311,6 +480,8 @@ def verify_log_path(path):
 
 for name in ("ledger", "flags", "checkins"):
     verify_log_path(store / f"{name}.jsonl")
+
+verify_frame_tree()
 
 workers = store / "workers"
 if workers.exists():
@@ -473,6 +644,14 @@ main() {
       [ "$#" -ge 1 ] || { usage; exit 2; }
       cmd_init_run "$@"
       ;;
+    write-frame)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_write_frame "$@"
+      ;;
+    write-tree)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_write_tree "$@"
+      ;;
     put)
       [ "$#" -ge 1 ] || { usage; exit 2; }
       cmd_put "$@"
@@ -492,6 +671,10 @@ main() {
     move-result)
       [ "$#" -ge 2 ] || { usage; exit 2; }
       cmd_move_result "$@"
+      ;;
+    metric-read)
+      [ "$#" -ge 1 ] || { usage; exit 2; }
+      cmd_metric_read "$@"
       ;;
     append)
       [ "$#" -ge 2 ] || { usage; exit 2; }

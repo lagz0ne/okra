@@ -1,16 +1,14 @@
 ---
 name: reverse-tornado-okr
 description: >
-  A workflow for setting up and running any goal as a self-correcting OKR loop with a measured
-  anti-goal guardrail. Use this whenever the user is setting OKRs, defining objectives and key
-  results, planning a goal, structuring a roadmap toward a metric, or asking how to make progress
-  on something measurable without breaking a constraint (budget, quality, risk, trust). Trigger
-  even when the user just says "help me set a goal", "what should my OKRs be", "I want to grow X",
-  or describes a target plus a thing they must not sacrifice - the anti-goal is the signal this
-  workflow fits. Also use when the user wants to delegate goal execution to an automated loop while
-  keeping human control of the direction. Produces the structured loop (objective, anti-goal,
-  decomposition, eval points, flags, and operating cadence); can optionally produce an explainer
-  artifact.
+  A workflow for turning goals, objectives, missions, measurable improvements, or decision-oriented
+  research into a self-correcting OKR loop with measured anti-goal guardrails. Use when the user is
+  setting OKRs, planning toward a metric, asking how to make progress without breaking a constraint
+  (budget, quality, risk, trust), or wants delegated loop execution with human control. Trigger even
+  for "help me set a goal", "what should my OKRs be", "I want to grow X", or open-ended research
+  that needs DKR discovery to reduce uncertainty. Produces candidate objective metrics and anti-goals
+  for ratification, then the structured loop: objective, anti-goal, decomposition, eval points,
+  flags, and operating cadence.
 ---
 
 # The Reverse Tornado - running a goal as a self-correcting loop
@@ -24,7 +22,15 @@ without blindly sprinting into danger.
 
 Apply the steps below in order. Do not skip the anti-goal - it is what makes the rest safe.
 
-## Step 1 - Set the frame (metric + target, and the wall)
+## Step 1 - Draft the frame (metric + target, and the wall)
+
+On receiving a goal-like, mission-like, improvement, or research request, first draft the frame.
+Do not wait for the user to phrase it as an OKR. Propose a **candidate objective** with the metric
+that would prove success, a target or target range when the source facts support one, and a short
+reasoning note for why that metric is the right proof. If the request is research, the first
+candidate objective can be decision-quality: "reduce uncertainty enough to decide X", with a metric
+such as confidence, decision readiness, evidence coverage, or risk retired. Mark it candidate until
+the human ratifies it.
 
 Pin two things before any planning:
 
@@ -35,6 +41,13 @@ Pin two things before any planning:
 - **Anti-goal**: the thing that must not be sacrificed, expressed with **its own metric**. "Keep
   monthly expense at or under $80k." It can be continuous (a drift gauge you watch) or binary
   (a tripwire that halts). State which.
+
+Anti-goals can be reusable across runs. When the user has not named one, propose candidate
+anti-goals from the current skill and any available past run context: budget/spend, quality, trust,
+safety, privacy/data boundaries, authority drift, time/DKR budget, storage integrity, and
+single-LLM-truth acceptance. Pick the ones that match the current goal and give each a metric.
+The user may add, remove, or alter anti-goals; treat that as healthy frame negotiation, then freeze
+only the human-ratified set.
 
 Why the anti-goal matters: the cheapest way to hit almost any objective is to wreck something
 unmeasured. Sales rises fastest by blowing the budget. The anti-goal is the wall that stops the
@@ -72,6 +85,8 @@ Decompose work into exactly three kinds. Keep them distinct; blurring them is wh
   unanswered, probability/confidence updates, risk or anti-goal implications, candidate CKRs, and
   the next unknowns. CKR/PKR entries stay candidate-only until the orchestrator accepts that
   checkpoint.
+  In delegated artifacts, write the gate explicitly: **Candidate CKRs and candidate PKRs are not
+  promoted until the orchestrator accepts the supporting DKR learning checkpoint.**
 - **CKR - Contribution / Key Result.** Measurable, has its own metric. This is what counts toward
   the objective. A CKR is **context and measurement**, not a worker job. It tells the orchestrator
   which contribution would matter and what direct metric proves it; it is not dispatched as work.
@@ -155,6 +170,20 @@ agent's own final answer is not proof of progress, storage integrity, or governe
 claims only when backed by deterministic evidence, store records, hashes, changed-path checks,
 human ratification, or independent review.
 
+For delegated or scored run stores, use the exact frame/tree contract so verification can catch
+drift. `frame/frame.v1.json` must include `frame_version`, `frame_hash`, `objective`, `anti_goals`,
+`metric_contracts`, `action_envelope`, and human approval or ratification evidence.
+`tree/tree.v1.json` must include `tree_version`, `frame_version`, `orchestrator`, `dkrs`, `ckrs`,
+and `pkrs`. Do not replace `orchestrator` with a vague `ownership` note. The `orchestrator` entry
+must say it owns **objective checks** and **subagent steering**; DKR and PKR entries are worker
+scopes; CKR entries are measurable context. When the helper is available, write these through
+`write-frame` and `write-tree`, then run `verify` before reporting success.
+Append direct objective and anti-goal ledger readings through `metric-read`, not generic `append`.
+Metric payloads must use `type: "metric_read"` (or `objective_metric_read` /
+`anti_goal_metric_read`), identify `metric_kind`, `metric_id`, `value`, `observed_at`, `source`, and
+`freshness`. For storage-governance anti-goals, record zero-valued metric reads for
+`ungoverned_direct_read`, `ungoverned_direct_write`, and `single_llm_truth`.
+
 A consequence worth knowing: the admissibility **dry-run** (propose-cost) worker has no side effect,
 so it is naturally idempotent and needs no key - which is why **dry-run is the default** for any move
 whose anti-goal cost cannot be known up front. Only the *committing* move is keyed and stored.
@@ -169,6 +198,10 @@ If the run continues across turns or time, define the update ritual before dispa
 orchestrator needs a **metric freshness contract** for every objective, CKR, and anti-goal metric:
 source of truth, owner, exact definition, read method, `observed_at`, `recorded_at`, `max_age`, lag
 window, and missing-data policy.
+Each metric read must carry an explicit freshness classification in one compact row or sentence:
+`observed_at=<timestamp> -> status=fresh|stale against max_age=<limit>`. If a copied or last-known
+reading is outside the limit, write that date next to `stale` and the limit, for example
+`2026-06-15 ... stale against the 72-hour max_age`.
 
 Then set the clock: start-of-turn freshness check, pre-dispatch admissibility, post-move metric
 read, end-of-turn status write, and an idle heartbeat when no worker finishes. Every round should
@@ -254,11 +287,12 @@ The human owns the **frame**: the objective and target, the CKR and anti-goal de
 thresholds, the metric contracts, the action envelope, and the call that a goal is wrong.
 **Goal-switching is human-only.**
 
-This is load-bearing. A loop that can switch its own goal can satisfy anything by quietly retreating
-to a goal it is already hitting - which makes every guardrail theater. Locking goal-switching to the
-human is what makes the anti-goal mean something. This is **best-effort**: the loop must try against
-the goal it was given; when effort goes in and the metric stays flat, it reports the gap and hands
-up the evidence (budget spent, tree built, contributions done, flat metric). The human decides.
+This is load-bearing. If goal switching sits inside the loop, the loop can satisfy anything by
+quietly retreating to a goal it is already hitting, and every guardrail becomes theater. Keeping goal
+switching with the human is what makes the anti-goal mean something. This is **best-effort**: the
+loop must try against the goal it was given; when effort goes in and the metric stays flat, it
+reports the gap and hands up the evidence (budget spent, tree built, contributions done, flat
+metric). The human decides.
 
 In team terms: no matter how much runs on its own, eventually someone makes the call - and the call
 belongs to a person.
@@ -288,24 +322,47 @@ size; you do not always need to draw the whole funnel.
 Deliver the structured loop: objective + target, the named anti-goal with its metric and type
 (drift/tripwire), the CKR/DKR/PKR decomposition, the three eval points instantiated for *this* goal,
 the flags, and the human-only frame. Use the user's real domain throughout - do not leave the example
-abstract.
+abstract. Preserve exact metric literals from the source material in addition to any explanation; if
+the source says `12 per 100`, include that exact phrase instead of only a paraphrase.
 
 When the user wants to run the goal over time, also deliver the Operating Loop: cadence, current
 round, metric freshness contracts, lag windows, `next_check_at`, stale-data policy, flag lifecycle,
-and what gets updated at every turn or timed heartbeat.
+and what gets updated at every turn or timed heartbeat. Include the current metric freshness
+classification, keeping `observed_at`, `recorded_at`, `fresh` or `stale`, and `max_age` in the same
+table row or sentence.
 
 For delegated loops, make these four lines explicit in the artifact:
 
 - The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the
-  objective metric reaches target or a human/blocking flag stops the loop.
+  objective metric reaches target or a human/blocking flag stops the loop. Use the exact phrase
+  **"until the objective metric reaches target"** once, then instantiate it with the domain target.
 - DKRs are scoped discovery-worker probes with budgets, probability/confidence outputs, a named
   steering decision to unlock, and explicit risk/anti-goal uncertainty to reduce.
 - CKR/PKR candidates are not promoted until the orchestrator accepts a DKR learning checkpoint.
+  Use the exact sentence: **"Candidate CKRs and candidate PKRs are not promoted until the
+  orchestrator accepts the supporting DKR learning checkpoint."**
 - CKRs are measurable contribution context with mini reverse-tornado discovery/delivery balance,
   not subagent work.
 - PKRs are progression-worker execution units and must report progress signals at check-ins.
 - Long-running workers write file-based progress reports under `.okra/runs/<run-id>/workers/` and
   use a timed heartbeat, defaulting to ten minutes when the human has not set a cadence.
+
+For delegated loops with storage, also state the exact frame/tree schema in the artifact or records:
+frame keys `frame_version`, `frame_hash`, `objective`, `anti_goals`, `metric_contracts`,
+`action_envelope`, and human approval/ratification evidence; tree keys `tree_version`,
+`frame_version`, `orchestrator`, `dkrs`, `ckrs`, and `pkrs`. The tree must use the key
+`orchestrator` and include the phrases `objective checks` and `subagent steering`.
+
+Avoid ambiguous frame-authority wording. Do not write that the loop, agent, model, or orchestrator
+may change, adjust, relax, redefine, retune, or switch the objective, target, threshold, anti-goal,
+guardrail, metric, or action envelope. Write that the loop raises evidence and the human decides.
+For boundary-drift gates, use rejection-shaped wording such as: **"Reject any attempted frame,
+guardrail, metric, threshold, or action-envelope change unless the human ratifies it."** Avoid
+permission-shaped wording even when describing a forbidden pattern.
+
+Define all four flags explicitly. For `pointless`, use the exact shape: **"Pointless opens when work
+finished or a CKR metric moved, but the objective metric stays flat / does not move after the lag
+window."** Then add the domain example and the stop/re-aim behavior.
 
 If the user wants a visual or shareable explainer, produce a self-contained HTML artifact. See
 `references/artifact-guide.md` for how (and how to keep the artifact within its own anti-goal:
@@ -321,7 +378,10 @@ single file, no external runtime, no decoration that does not carry meaning).
   decision it unlocks and the risk or anti-goal uncertainty it reduces.
 - Promoting CKRs or PKRs before a DKR learning checkpoint has produced evidence, probabilities, and
   decision-ready risk implications.
+- Omitting the `pointless` flag, or defining it without saying the objective metric stays flat or
+  does not move after the lag window.
 - Letting the loop redefine, retune, or switch the goal. That is always the human's call.
+- Writing a run-store tree with `ownership` but no `orchestrator` key, or omitting `frame_version`.
 - Running a recurring OKR loop without a freshness contract, heartbeat, lag window, and flag owner.
 - Running multiple OKRA loops against the same flat `.okra/ledger.jsonl`, `.okra/checkins.jsonl`,
   or `.okra/workers/` path instead of giving each loop its own run store.

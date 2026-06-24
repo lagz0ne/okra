@@ -73,6 +73,59 @@ Generated view:
 - `.okra/runs/<run-id>/status.md`: generated from append-only source records. Do not edit it by
   hand or treat it as authority.
 
+## Required Frame and Tree Shape
+
+For delegated or scored runs, keep the frame and tree boring and machine-checkable.
+
+`frame/frame.v1.json` must be an object with:
+
+- `frame_version`
+- `frame_hash`
+- `objective`
+- `anti_goals`
+- `metric_contracts`
+- `action_envelope`
+- `human_approval` or other explicit ratification evidence
+
+`tree/tree.v1.json` must be an object with:
+
+- `tree_version`
+- `frame_version`
+- `orchestrator`
+- `dkrs`
+- `ckrs`
+- `pkrs`
+
+Use the exact key `orchestrator`. Do not replace it with `ownership`. The orchestrator entry should
+say it owns `objective checks`, check-ins, the OKR board, and `subagent steering`. DKR entries should
+be discovery-worker scopes with budgets, decision targets, risk or anti-goal uncertainty, and
+probability/confidence outputs. CKR entries should be measurable contribution context, not worker
+jobs. PKR entries should be progression-worker scopes with progress signals.
+
+When the helper is available, prefer:
+
+```sh
+"$helper" write-frame frame.json "$run_store"
+"$helper" write-tree tree.json "$run_store"
+"$helper" verify "$run_store"
+```
+
+If `verify` reports missing `frame_version`, `orchestrator`, `objective checks`, or
+`subagent steering`, fix the JSON before dispatching or reporting success.
+
+## Metric Read Records
+
+Use the helper's `metric-read` command for objective, CKR, and anti-goal ledger entries. Do not use
+generic `append ledger` for these reads in scored or delegated runs.
+
+```json
+{"type":"metric_read","metric_kind":"objective","metric_id":"objective.governed_content_use_rate","value":0.9,"target":0.9,"observed_at":"2026-06-24T00:00:00Z","source":"deterministic checker","freshness":"observed_at=2026-06-24T00:00:00Z -> status=fresh against max_age=72h"}
+```
+
+For storage-governance runs, append zero-valued anti-goal metric reads with `type:
+"anti_goal_metric_read"` and metric ids containing `ungoverned_direct_read`,
+`ungoverned_direct_write`, and `single_llm_truth`.
+
 ## Append-Only Log Contract
 
 Every line in a run's `ledger.jsonl`, `flags.jsonl`, and `checkins.jsonl` should be a JSON object
@@ -154,7 +207,7 @@ Governed content use should also be explicit in check-ins:
 - `content_read`: a payload with `content_sha256` for important content read from the store.
 - `content_write`: a payload with `target` and `content_sha256` for important artifacts written
   through the store.
-- `steering_checkin`: a payload with `pkr_signals` and `steering_decision`.
+- `steering_checkin`: a payload with `worker_progress_refs`, `pkr_signals`, and `steering_decision`.
 - `acceptance_evidence_checkin`: a payload with deterministic evidence and
   `single_llm_truth_acceptance_count: 0`.
 
@@ -185,6 +238,8 @@ test -x "$helper" || helper=".claude/skills/reverse-tornado-okr/scripts/okra-sto
 
 "$helper" init .okra
 run_store="$("$helper" init-run onboarding-activation .okra)"
+"$helper" write-frame frame.json "$run_store"
+"$helper" write-tree tree.json "$run_store"
 "$helper" put path/to/artifact.md "$run_store"
 "$helper" read-content <sha256> "$run_store"
 "$helper" write-content tasks/loop.md "$run_store/drafts/loop.md" "$run_store"

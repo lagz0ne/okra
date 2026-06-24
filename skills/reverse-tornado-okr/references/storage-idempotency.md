@@ -16,10 +16,16 @@ OKRA loops may run at the same time, keep the shared root as `.okra/` and place 
   Include `frame_version`, `frame_hash`, metric contracts, anti-goal coverage review, action
   envelope, and the human approval record.
 - `.okra/runs/<run-id>/tree/tree.v1.json`: current DKR/CKR/PKR decomposition and worker scopes.
+  Include `tree_version`, `frame_version`, `orchestrator`, `dkrs`, `ckrs`, and `pkrs`. The
+  `orchestrator` field must explicitly own objective checks, check-ins, the OKR board, and subagent
+  steering. Do not use a generic `ownership` field as a substitute for `orchestrator`.
 - `.okra/runs/<run-id>/moves/<key-sha256>.json`: write-once committed move result. Each file
   records the full `idempotency_key`, `key_sha256`, `payload_sha256`, committed timestamp, and payload.
 - `.okra/runs/<run-id>/ledger.jsonl`: append-only direct objective and anti-goal readings with `observed_at`,
   `recorded_at`, source, query/report hash, window, value, unit, and freshness status.
+  When the helper is available, write these with `metric-read` and payload type `metric_read`,
+  `objective_metric_read`, or `anti_goal_metric_read`; do not use ambiguous `kind: objective`
+  ledger payloads.
 - `.okra/runs/<run-id>/flags.jsonl`: append-only `cannot`, `breaking`, `pointless`, and `authority_drift` flags with
   lifecycle status and resolution records.
 - `.okra/runs/<run-id>/checkins.jsonl`: append-only steering records for each ritual check-in, including learning
@@ -74,7 +80,8 @@ Dry-run propose-cost moves do not need idempotency keys because they do not comm
 10. Require worker progress reports on completion, unknown discovery, flag-worthy risk, and timed
     heartbeat. Ten minutes is a useful default for live long-running workers.
 11. Write the result once under `.okra/runs/<run-id>/moves/`.
-12. Read direct objective and anti-goal metrics from source and append to `ledger.jsonl`.
+12. Read direct objective and anti-goal metrics from source and append to `ledger.jsonl` through
+    `metric-read` when the helper is available.
 13. Append a check-in record with worker progress refs, PKR signals, learning collected,
     process/context updates, and `next_check_at`.
 14. Evaluate `cannot`, `breaking`, `pointless`, and `authority_drift` flags.

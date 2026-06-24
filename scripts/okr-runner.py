@@ -14,6 +14,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,7 @@ BWRAP_RUNS = "/tmp/runs"
 CHECKERS_DIR = REPO_ROOT / "evals" / "blindbox" / "checks"
 GOLDEN_DIR = REPO_ROOT / "evals" / "blindbox" / "golden"
 CHECK_TIMEOUT = 60
+DEFAULT_HEARTBEAT_SECONDS = 30
 MAX_SECRET_SCAN_BYTES = 5 * 1024 * 1024
 QUICK_VALIDATE = (
     Path.home()
@@ -45,6 +48,13 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     ("github_token", re.compile(rb"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
     ("slack_token", re.compile(rb"\bxox[aboprs]-[A-Za-z0-9-]{20,}\b")),
     ("bearer_token", re.compile(rb"(?i)\bauthorization\s*:\s*bearer\s+[A-Za-z0-9._-]{30,}")),
+    (
+        "env_secret_assignment",
+        re.compile(
+            rb"(?i)\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD)[A-Z0-9_]*"
+            rb"\s*=\s*[\"']?[A-Za-z0-9._~:/+=-]{20,}"
+        ),
+    ),
     (
         "credential_field",
         re.compile(
@@ -176,6 +186,77 @@ def workspace_path(workspace: Path, rel_path: str) -> Path:
     return resolved
 
 
+def utc_now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def append_progress(run_dir: Path, payload: dict[str, Any]) -> None:
+    path = run_dir / "progress.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"recorded_at": utc_now_iso(), **payload}, sort_keys=True) + "\n")
+
+
+def path_summary(path: Path) -> dict[str, Any]:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False}
+    if path.is_dir():
+        file_count = 0
+        latest_mtime = stat.st_mtime
+        latest_path = path
+        for child in path.rglob("*"):
+            try:
+                if not child.is_file():
+                    continue
+                child_mtime = child.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            file_count += 1
+            if child_mtime > latest_mtime:
+                latest_mtime = child_mtime
+                latest_path = child
+        return {
+            "path": str(path),
+            "exists": True,
+            "kind": "dir",
+            "file_count": file_count,
+            "latest_path": str(latest_path),
+            "latest_mtime": dt.datetime.fromtimestamp(latest_mtime, dt.timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+    return {
+        "path": str(path),
+        "exists": True,
+        "kind": "file",
+        "bytes": stat.st_size,
+        "mtime": dt.datetime.fromtimestamp(stat.st_mtime, dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+
+
+def heartbeat_line(label: str, elapsed_seconds: int, pid: int, summaries: list[dict[str, Any]]) -> str:
+    changed = []
+    for summary in summaries:
+        if not summary.get("exists"):
+            continue
+        path = Path(str(summary["path"])).name
+        if summary.get("kind") == "dir":
+            changed.append(
+                f"{path}:files={summary.get('file_count')} "
+                f"latest={Path(str(summary.get('latest_path'))).name}@{summary.get('latest_mtime')}"
+            )
+        else:
+            changed.append(f"{path}:bytes={summary.get('bytes')} mtime={summary.get('mtime')}")
+    suffix = "; ".join(changed) if changed else "no output files yet"
+    return f"heartbeat: {label} elapsed={elapsed_seconds}s pid={pid} {suffix}"
+
+
 def run_logged(
     cmd: list[str],
     *,
@@ -185,30 +266,108 @@ def run_logged(
     env: dict[str, str] | None = None,
     dry_run: bool = False,
     timeout: int | None = None,
+    label: str = "agent",
+    run_dir: Path | None = None,
+    monitor_paths: list[Path] | None = None,
+    heartbeat_seconds: int = DEFAULT_HEARTBEAT_SECONDS,
 ) -> int:
     print_cmd(cmd)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     command_path = log_path.parent / f"{log_path.stem}.command.txt"
     command_path.write_text(shlex.join(cmd) + "\n", encoding="utf-8")
+    run_dir = run_dir or log_path.parent
+    monitor_paths = monitor_paths or [log_path]
     if dry_run:
         log_path.write_text(shlex.join(cmd) + "\n", encoding="utf-8")
+        append_progress(run_dir, {"event": "agent_dry_run", "label": label, "command_path": str(command_path)})
         return 0
+
+    append_progress(
+        run_dir,
+        {
+            "event": "agent_start",
+            "label": label,
+            "command_path": str(command_path),
+            "timeout_seconds": timeout,
+            "heartbeat_seconds": heartbeat_seconds,
+        },
+    )
     with log_path.open("w", encoding="utf-8") as log:
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=cwd,
-                input=stdin,
-                text=True,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=env,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            log.write(f"\nTIMEOUT after {timeout} seconds\n")
-            return 124
-    return proc.returncode
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            text=True,
+            stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        if stdin is not None and proc.stdin is not None:
+            def feed_stdin() -> None:
+                try:
+                    assert proc.stdin is not None
+                    proc.stdin.write(stdin)
+                except (BrokenPipeError, OSError):
+                    append_progress(run_dir, {"event": "agent_stdin_broken_pipe", "label": label, "pid": proc.pid})
+                finally:
+                    try:
+                        if proc.stdin is not None:
+                            proc.stdin.close()
+                    except (BrokenPipeError, OSError):
+                        pass
+
+            threading.Thread(target=feed_stdin, name=f"{label}-stdin", daemon=True).start()
+
+        started = time.monotonic()
+        next_heartbeat = started + max(1, heartbeat_seconds)
+        while True:
+            code = proc.poll()
+            now = time.monotonic()
+            if code is not None:
+                elapsed = int(now - started)
+                summaries = [path_summary(path) for path in monitor_paths]
+                append_progress(
+                    run_dir,
+                    {
+                        "event": "agent_exit",
+                        "label": label,
+                        "exit_code": code,
+                        "elapsed_seconds": elapsed,
+                        "outputs": summaries,
+                    },
+                )
+                return code
+
+            elapsed = int(now - started)
+            if timeout is not None and elapsed >= timeout:
+                log.write(f"\nTIMEOUT after {timeout} seconds\n")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                append_progress(
+                    run_dir,
+                    {"event": "agent_timeout", "label": label, "elapsed_seconds": elapsed, "timeout_seconds": timeout},
+                )
+                return 124
+
+            if now >= next_heartbeat:
+                summaries = [path_summary(path) for path in monitor_paths]
+                print(heartbeat_line(label, elapsed, proc.pid, summaries), flush=True)
+                append_progress(
+                    run_dir,
+                    {
+                        "event": "agent_heartbeat",
+                        "label": label,
+                        "elapsed_seconds": elapsed,
+                        "pid": proc.pid,
+                        "outputs": summaries,
+                    },
+                )
+                next_heartbeat = now + max(1, heartbeat_seconds)
+            time.sleep(1)
 
 
 def agents_from_arg(value: str) -> list[str]:
@@ -333,6 +492,7 @@ def validate_project_skill_links() -> list[str]:
 def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
     helper = skill_path() / "scripts" / "okra-store.sh"
     print_cmd([str(helper), "move-result", "<idempotency-key>", "<payload.json>", "<store>"])
+    print_cmd([str(helper), "metric-read", "<payload.json>", "<store>"])
     if dry_run:
         return 0
 
@@ -340,6 +500,10 @@ def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
         root = Path(tmp)
         payload_a = root / "move-a.json"
         payload_b = root / "move-b.json"
+        frame = root / "frame.json"
+        frame_conflict = root / "frame-conflict.json"
+        tree = root / "tree.json"
+        metric = root / "metric.json"
         payload_a.write_text('{"type":"move","value":1}\n', encoding="utf-8")
         payload_b.write_text('{"type":"move","value":2}\n', encoding="utf-8")
 
@@ -362,6 +526,50 @@ def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
             print(init_run.stdout, file=sys.stderr)
             return 1
         run_store = init_run.stdout.strip().splitlines()[-1]
+        frame_payload = {
+            "frame_version": "frame.v1",
+            "frame_hash": "smoke-frame-hash",
+            "objective": {"metric": "smoke_objective", "target": 1},
+            "anti_goals": [{"metric": "smoke_breakage_count", "threshold": 0, "type": "tripwire"}],
+            "metric_contracts": [{"metric": "smoke_objective", "source_of_truth": "fixture"}],
+            "action_envelope": {"allowed": ["helper smoke"], "forbidden": ["external side effects"]},
+            "human_approval": {"status": "ratified", "approver": "validator"},
+        }
+        tree_payload = {
+            "tree_version": "tree.v1",
+            "frame_version": "frame.v1",
+            "orchestrator": {
+                "owns": ["objective checks", "check-ins", "OKR board", "subagent steering"],
+            },
+            "dkrs": [{"id": "DKR-smoke", "worker_scope": "discovery"}],
+            "ckrs": [{"id": "CKR-smoke", "kind": "measurable contribution context"}],
+            "pkrs": [{"id": "PKR-smoke", "worker_scope": "progression"}],
+        }
+        frame.write_text(json.dumps(frame_payload) + "\n", encoding="utf-8")
+        frame_conflict_payload = {**frame_payload, "objective": {"metric": "changed_objective", "target": 2}}
+        frame_conflict.write_text(json.dumps(frame_conflict_payload) + "\n", encoding="utf-8")
+        tree.write_text(json.dumps(tree_payload) + "\n", encoding="utf-8")
+        metric.write_text(
+            json.dumps(
+                {
+                    "type": "metric_read",
+                    "metric_kind": "objective",
+                    "metric_id": "objective.smoke",
+                    "value": 1,
+                    "target": 1,
+                    "observed_at": "2026-06-24T00:00:00Z",
+                    "source": "helper smoke",
+                    "freshness": "observed_at=2026-06-24T00:00:00Z -> status=fresh against max_age=1d",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        write_frame = run([str(helper), "write-frame", str(frame), run_store])
+        replay_frame = run([str(helper), "write-frame", str(frame), run_store])
+        conflict_frame = run([str(helper), "write-frame", str(frame_conflict), run_store])
+        write_tree = run([str(helper), "write-tree", str(tree), run_store])
+        metric_read = run([str(helper), "metric-read", str(metric), run_store])
         key = "smoke/frame/hash/node/write/scope/input"
 
         first = run([str(helper), "move-result", key, str(payload_a), run_store])
@@ -369,9 +577,29 @@ def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
         conflict = run([str(helper), "move-result", key, str(payload_b), run_store])
         verify = run([str(helper), "verify", run_store])
 
-        if first.returncode or replay.returncode or conflict.returncode == 0 or verify.returncode:
+        if (
+            write_frame.returncode
+            or replay_frame.returncode
+            or conflict_frame.returncode == 0
+            or write_tree.returncode
+            or metric_read.returncode
+            or first.returncode
+            or replay.returncode
+            or conflict.returncode == 0
+            or verify.returncode
+        ):
             print("okra-store helper move-result smoke failed", file=sys.stderr)
-            for label, proc in (("first", first), ("replay", replay), ("conflict", conflict), ("verify", verify)):
+            for label, proc in (
+                ("write-frame", write_frame),
+                ("replay-frame", replay_frame),
+                ("conflict-frame", conflict_frame),
+                ("write-tree", write_tree),
+                ("metric-read", metric_read),
+                ("first", first),
+                ("replay", replay),
+                ("conflict", conflict),
+                ("verify", verify),
+            ):
                 print(f"{label}: exit {proc.returncode}\n{proc.stdout}", file=sys.stderr)
             return 1
     return 0
@@ -853,6 +1081,7 @@ def run_agent_case(
     isolation: str,
     dry_run: bool,
     timeout: int | None,
+    heartbeat_seconds: int,
 ) -> int:
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -875,6 +1104,21 @@ def run_agent_case(
         log_path = artifacts / "agent.log"
 
     try:
+        raw_monitor_paths = [
+            log_path,
+            artifacts / "final.md",
+            agent_output / "final.md",
+            workspace / "tasks",
+            workspace / ".okra",
+        ]
+        monitor_paths = []
+        seen_monitor_paths = set()
+        for path in raw_monitor_paths:
+            key = str(path)
+            if key in seen_monitor_paths:
+                continue
+            seen_monitor_paths.add(key)
+            monitor_paths.append(path)
         code = run_logged(
             cmd,
             cwd=workspace,
@@ -882,6 +1126,10 @@ def run_agent_case(
             stdin=stdin,
             dry_run=dry_run,
             timeout=timeout,
+            label=f"{case['id']} / {agent}",
+            run_dir=run_dir,
+            monitor_paths=monitor_paths,
+            heartbeat_seconds=heartbeat_seconds,
         )
         if agent == "codex" and not dry_run:
             final_output = agent_output / "final.md"
@@ -975,6 +1223,7 @@ def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
                 and path.suffix.lower() not in STRUCTURED_CREDENTIAL_EXTS
                 and path.suffix.lower() not in TRANSCRIPT_CREDENTIAL_EXTS
                 and path.name not in {".env"}
+                and path.suffix
             ):
                 continue
             if pattern.search(data):
@@ -1242,7 +1491,7 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
         )
 
     cases = load_cases(args.case)
-    keep_going = args.keep_going or args.agent == "both"
+    keep_going = False if args.fail_fast else args.keep_going or args.agent == "both"
     failures = 0
     for case in cases:
         for agent in agents_from_arg(args.agent):
@@ -1262,6 +1511,11 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
             prompt = build_case_prompt(case, workspace_root)
             runner_error = ""
             try:
+                print(
+                    f"start: {case['id']} / {agent} model={model_identity(agent)['requested']} "
+                    f"run_dir={run_dir}",
+                    flush=True,
+                )
                 code = run_agent_case(
                     agent=agent,
                     case=case,
@@ -1271,6 +1525,7 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                     isolation=args.isolation,
                     dry_run=args.dry_run,
                     timeout=args.timeout,
+                    heartbeat_seconds=args.heartbeat_seconds,
                 )
                 checks = [] if args.dry_run else [evaluate_agent_execution(agent, run_dir, code)]
                 if not args.dry_run:
@@ -1368,7 +1623,9 @@ def build_parser() -> argparse.ArgumentParser:
     blindbox.add_argument("--dry-run", action="store_true")
     blindbox.add_argument("--allow-unisolated", action="store_true")
     blindbox.add_argument("--keep-going", action="store_true")
+    blindbox.add_argument("--fail-fast", action="store_true", help="stop after the first failed case")
     blindbox.add_argument("--timeout", type=int, default=1800)
+    blindbox.add_argument("--heartbeat-seconds", type=int, default=DEFAULT_HEARTBEAT_SECONDS)
     blindbox.set_defaults(func=cmd_blindbox)
 
     return parser

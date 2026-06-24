@@ -20,6 +20,11 @@ work:
 
 Store both `observed_at` (when the world value was measured) and `recorded_at` (when the loop read
 it). A metric can be newly recorded and still stale if `observed_at` is too old.
+For every current or copied reading, write a compact classification that keeps the evidence and rule
+together: `observed_at=<timestamp>, recorded_at=<timestamp>, status=fresh|stale against
+max_age=<limit>`. Do not scatter these across separate paragraphs. For example, if a copied
+`2026-06-15` reading is evaluated under a 72-hour limit, state that the `2026-06-15` reading is
+`stale against the 72-hour max_age`.
 
 ## Ritual Clock
 
@@ -72,7 +77,7 @@ When producing an automated or recurring run artifact, include an **Operating Lo
 - cadence: turn budget, review frequency, and idle heartbeat
 - `current_round`, `last_metric_read_at`, and `next_check_at`
 - metric read table with source, owner, observed_at, recorded_at, max_age, and lag rule
-- stale-data policy and what is currently stale, if anything
+- stale-data policy and what is currently stale, if anything, with each stale reading classified in
+  the same row or sentence as its `observed_at` date and `max_age`
 - open flags with status, owner, deadline, and blocking effect
 - next admissibility check and whether it needs a dry-run propose-cost worker
-
