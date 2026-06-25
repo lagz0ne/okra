@@ -80,6 +80,18 @@ PRIVATE_KEY_BLOCK_TEXT = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
 )
+CLAUDE_ACCOUNT_CONFIG_KEYS = ("oauthAccount", "userID", "machineID")
+CLAUDE_OAUTH_ACCOUNT_CONFIG_KEYS = (
+    "accountUuid",
+    "billingType",
+    "organizationRateLimitTier",
+    "organizationRole",
+    "organizationType",
+    "organizationUuid",
+    "seatTier",
+    "userRateLimitTier",
+    "workspaceRole",
+)
 
 
 class RunnerError(RuntimeError):
@@ -1064,12 +1076,42 @@ def prepare_codex_home(run_dir: Path) -> None:
     runtime_cache(run_dir).mkdir(parents=True, exist_ok=True)
 
 
+def sanitized_claude_account_config(host_config: Path) -> dict[str, Any]:
+    if not host_config.exists():
+        return {}
+    try:
+        data = json.loads(host_config.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key in CLAUDE_ACCOUNT_CONFIG_KEYS:
+        if key not in data:
+            continue
+        value = data[key]
+        if key == "oauthAccount" and isinstance(value, dict):
+            sanitized[key] = {
+                child_key: value[child_key]
+                for child_key in CLAUDE_OAUTH_ACCOUNT_CONFIG_KEYS
+                if child_key in value
+            }
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 def prepare_claude_home(run_dir: Path) -> None:
     home = runtime_home(run_dir)
     claude_home = home / ".claude"
     claude_home.mkdir(parents=True, exist_ok=True)
     for dirname in ("session-env", "sessions", "shell-snapshots", "projects", "tasks", "cache"):
         (claude_home / dirname).mkdir(parents=True, exist_ok=True)
+    claude_account_config = sanitized_claude_account_config(Path.home() / ".claude.json")
+    (home / ".claude.json").write_text(
+        json.dumps(claude_account_config, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
     (claude_home / ".credentials.json").touch(exist_ok=True)
     runtime_cache(run_dir).mkdir(parents=True, exist_ok=True)
 
@@ -1872,8 +1914,9 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 "input_hashes": input_hashes(case, prompt),
                 "output_hashes": {} if args.dry_run else output_hashes(run_dir, workspace, baseline_snapshot),
                 "credential_policy": (
-                    "agent auth file mounted read-only when required; sandbox env is cleared before "
-                    "agent launch; runtime home/cache/output scratch lives under run_dir/runtime/ and "
+                    "agent auth files mounted read-only when required; Claude account config is minimized into "
+                    "runtime home before launch; sandbox env is cleared before agent launch; "
+                    "runtime home/cache/output scratch lives under run_dir/runtime/ and "
                     "is checked for post-run removal; preserved run artifacts and run-tree hashes outside "
                     "runtime/ are scanned for known credential patterns; if runtime/ remains after scrub, "
                     "the runtime cleanup check scans and hashes that leftover scratch"

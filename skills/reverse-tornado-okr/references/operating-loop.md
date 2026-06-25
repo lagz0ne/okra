@@ -38,6 +38,45 @@ Every run has a clock. It can be turn-based, time-based, or both:
 
 Do not dispatch committing work when required metric readings are stale unless the human explicitly
 waives the stale state for that move. The waiver is a flag resolution record, not a quiet override.
+In delegated artifacts, keep heartbeat proof compact enough to audit with one read: include a line
+starting `Heartbeat cadence and next_check_at:` that names the cadence and the next scheduled check.
+
+## Steering Value
+
+A check-in is useful only if it changes steering quality. Record the value chain in append-only
+state:
+
+- inbound signal: worker progress ref, metric signal, risk signal, stale metric, budget signal, or
+  human steering input
+- decision delta: promote, hold, pause, spawn discovery, veto, re-rank, fund, stop, or close a
+  budget lane
+- affected scope: DKR, CKR, PKR, allocation, flag, or action envelope item
+- expected or direct effect: objective movement, anti-goal risk reduction, uncertainty reduction,
+  saved turns/spend, avoided pointless continuation, or avoided budget overrun
+- evidence ref: metric read, worker progress record, hash, or flag/check-in record
+
+Track this explicitly with a value metric such as `steering_value_score >= 0.75`,
+`valuable_steering_decision_count >= 1`, or a domain equivalent. Also track the anti-goal
+`no_value_checkin_count == 0`. A loop with tidy check-in records but no state/allocation decision
+or risk/metric effect is still drifting.
+When using a run store, append the steering-value metric to the ledger as a metric read; prose in the
+task artifact is not enough.
+
+## Eval Points
+
+Delegated run artifacts should include a compact **Eval Points** section so the control logic is
+auditable without reconstructing it from scattered records:
+
+- **Admissibility before action**: screen the next move against fresh anti-goal readings or dry-run
+  cost before dispatch.
+- **Direct read after action**: read objective, CKR, and anti-goal metrics from source records after
+  workers return.
+- **Paired goal/anti-goal eval**: check objective movement and anti-goal hold together; success
+  requires both sides to pass.
+
+For every CKR, write a compact `CKR-level discovery/delivery balance:` line that names the discovery
+needed for the CKR to be meaningful and the delivery path that becomes PKR work only after that
+uncertainty is reduced.
 
 ## Pointless Needs a Window
 
@@ -80,4 +119,6 @@ When producing an automated or recurring run artifact, include an **Operating Lo
 - stale-data policy and what is currently stale, if anything, with each stale reading classified in
   the same row or sentence as its `observed_at` date and `max_age`
 - open flags with status, owner, deadline, and blocking effect
+- steering-value evidence for each nontrivial check-in: inbound signal, decision delta, effect, and
+  evidence ref
 - next admissibility check and whether it needs a dry-run propose-cost worker

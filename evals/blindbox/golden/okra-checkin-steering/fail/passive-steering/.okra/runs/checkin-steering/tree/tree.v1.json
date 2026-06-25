@@ -1,0 +1,45 @@
+{
+  "tree_version": "tree.v1",
+  "frame_version": "frame.v1",
+  "orchestrator": {
+    "id": "okra-orchestrator",
+    "owns": [
+      "objective checks",
+      "check-ins",
+      "OKR board",
+      "subagent steering",
+      "DKR budget gate"
+    ],
+    "does_not_stop_on": [
+      "PKR completion",
+      "board item completion"
+    ]
+  },
+  "dkrs": [
+    {
+      "id": "dkr-budget-quality",
+      "worker_id": "dkr-budget-quality",
+      "decision_target": "decide whether to promote CKR-A/PKR-A or hold them for more discovery",
+      "budget": {
+        "turn_budget": 4,
+        "spent_turns": 2
+      },
+      "status": "checkpoint_accepted"
+    }
+  ],
+  "ckrs": [
+    {
+      "id": "ckr-healthy-checkin-rate",
+      "metric": "healthy_checkin_rate",
+      "status": "promoted_after_dkr_checkpoint"
+    }
+  ],
+  "pkrs": [
+    {
+      "id": "pkr-checkin-delivery",
+      "worker_id": "pkr-checkin-delivery",
+      "from_ckr": "ckr-healthy-checkin-rate",
+      "status": "running"
+    }
+  ]
+}

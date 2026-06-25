@@ -6,16 +6,20 @@ decorative.
 Candidate objective:
 
 - `healthy_checkin_rate >= 0.90` across scored OKRA harness runs.
+- `steering_value_score >= 0.75` for check-ins that change allocation, state, or risk posture.
 
 Definition: a healthy check-in consumes current worker progress, preserves DKR budget state, includes
 PKR progress signals, evaluates flags/anti-goals, and emits an outbound steering decision with the
-next check time.
+next check time. A valuable check-in also records the inbound signal, the decision delta it caused,
+the affected DKR/CKR/PKR/allocation, and the expected or direct metric, risk, uncertainty, or
+waste-reduction effect.
 
 Candidate anti-goals:
 
 - `dkr_budget_overrun_count == 0`
 - `unsteered_worker_edge_count == 0`
 - `no_progress_loop_continuation_count == 0`
+- `no_value_checkin_count == 0`
 
 The key risk is that the loop asks for better DKR forever. DKR quality matters, but DKR is
 open-ended expense; every DKR must have a turn/time budget, spent/remaining state, a stop rule, and
@@ -39,6 +43,7 @@ The anti-goal ledger must directly read:
 - `dkr_budget_overrun_count == 0`
 - `unsteered_worker_edge_count == 0`
 - `no_progress_loop_continuation_count == 0`
+- `no_value_checkin_count == 0`
 
 The flag policy must cover cannot, breaking, pointless, and authority drift with open,
 acknowledged, resolved, and waived states plus the pause/stop/resume behavior.

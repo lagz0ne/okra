@@ -32,7 +32,8 @@ CHECKS = {
         r"human frame owner|human owns the objective|human owns)"
     ),
     "action authority envelope is explicit": (
-        r"(action envelope|allowed move|forbidden action|approval gate|spend cap|blast[- ]radius|data boundar|rollback)"
+        r"(action[_ -]?envelope|allowed move|forbidden (?:action|move)|approval gate|spend cap|"
+        r"blast[- ]radius|data boundar|rollback)"
     ),
     "human-owned frame is explicit": (
         r"(human-owned|human owns|human-only|goal-switching is human-only|"

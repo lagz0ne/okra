@@ -19,6 +19,102 @@ EXPECTED_FAIL_PATTERNS = {
     "low-health-rate": r"healthy_checkin_rate is below 0\.90",
     "no-dkr-budget": r"ledger lacks DKR budget anti-goal read|DKR progress lacks explicit budget",
     "no-pkr-signals": r"check-ins lack PKR progress signals",
+    "no-steering-value": r"(ledger lacks steering value metric read|check-ins lack steering value evidence)",
+    "passive-steering": r"check-ins lack nontrivial steering intervention",
+}
+
+DKR_RISK_PATTERN = (
+    r"\b(risk(?: if skipped)?|risk_if_skipped|"
+    r"risk[_ -]?or[_ -]?anti[_ -]?goal[_ -]?uncertainty(?:[_ -]?reduced)?|"
+    r"anti[_ -]?goal[_ -]?uncertainty(?:[_ -]?reduced)?|anti[- ]goal risk|guardrail[_ -]?uncertainty|"
+    r"trap|traps|safe|safety|unsafe|harm|wall|veto|admissibility|"
+    r"avoid wasting|not wasting|waste)\b"
+)
+
+VALUE_EFFECT_PATTERN = (
+    r"\b((?:expected|direct)?[_ -]?(?:metric|risk|uncertainty|waste)?[_ -]?effect|"
+    r"risk[_ -]?reduction|waste[_ -]?reduction[_ -]?effect|expected[_ -]?direct[_ -]?effect|"
+    r"objective[_ -]?effect|anti[_ -]?goal[_ -]?effect|waste[_ -]?avoided|"
+    r"uncertainty[_ -]?reduction|saved[_ -]?turns|avoided[_ -]?overrun)\b"
+)
+SIGNAL_SOURCE_PATTERN = (
+    r"\b(worker[_ -]?signal|metric[_ -]?signal|risk[_ -]?signal|progress[_ -]?signal|"
+    r"budget[_ -]?signal|inbound[_ -]?signal|stale[_ -]?metric|late[_ -]?discovery|"
+    r"quality[_ -]?drift|off[_ -]?track|worker[_ -]?progress[_ -]?refs)\b"
+)
+DECISION_DELTA_PATTERN = (
+    r"\b(decision[_ -]?delta|state[_ -]?delta|allocation[_ -]?delta|board[_ -]?delta|"
+    r"changed[_ -]?state|promote|promoted|hold|held|pause|paused|spawn|spawned|"
+    r"veto|vetoed|rerank|reranked|fund|funded|stop|stopped|closed[_ -]?dkr[_ -]?budget)\b"
+)
+AFFECTED_SCOPE_PATTERN = r"\baffected[_ -]?(?:scopes?|dkr|ckr|pkr|allocations?)\b"
+EVIDENCE_REF_PATTERN = r"\bevidence[_ -]?refs?\b"
+NONTRIVIAL_DECISION_PATTERN = (
+    r"\b(promote|promoted|promote_candidates|hold|held|pause|paused|spawn|spawned|veto|vetoed|"
+    r"rerank|reranked|fund|funded|stop|stopped|closed[_ -]?dkr[_ -]?budget(?:[_ -]?lane)?|"
+    r"reallocate|reallocated|reallocation|allocation[_ -]?delta|allocation[_ -]?change|"
+    r"state[_ -]?delta|state[_ -]?change|board[_ -]?delta|board[_ -]?change|changed[_ -]?state)\b"
+)
+NEGATIVE_VALUE_PATTERN = (
+    r"\b(no[_ -]?direct(?:[_ -]?steering)?[_ -]?change|not[_ -]?demonstrated|"
+    r"none[_ -]?continue|no[_ -]?(?:allocation|state|board)[_ -]?change|"
+    r"without[_ -]?(?:allocation|state|board)[_ -]?change)\b"
+)
+NEGATED_DECISION_PATTERN = (
+    r"\b(?:not|no|do[_ -]?not|dont|don't)[\s_:-]{0,30}"
+    r"(?:promote|hold|pause|spawn|veto|rerank|fund|stop|allocat|chang(?:e|ing))\b|"
+    r"\b(?:no|without)[_ -]?(?:allocation|state|board|allocation[_ -]or[_ -]state)[_ -]?change\b|"
+    r"\bnone(?:[_ -]?continue)?(?:[_ -]?without[_ -]?(?:allocation|state|board)[_ -]?change)?\b"
+)
+PASSIVE_DELTA_PATTERN = r"\b(continue|monitor|observe|unchanged|same|none|no[_ -]?change)\b"
+SUBSTANTIVE_DELTA_PATTERN = (
+    r"\b(from\b[\s\S]{0,80}\bto\b|[-=]>|increase|increased|decrease|decreased|"
+    r"opened|closed|active|inactive|accepted|rejected)\b"
+)
+SIGNAL_KEYS = {
+    "inbound_signal",
+    "worker_signal",
+    "metric_signal",
+    "risk_signal",
+    "progress_signal",
+    "budget_signal",
+}
+AFFECTED_KEYS = {
+    "affected_scope",
+    "affected_scopes",
+    "affected_dkr",
+    "affected_ckr",
+    "affected_pkr",
+    "affected_allocation",
+    "affected_allocations",
+}
+EVIDENCE_KEYS = {"evidence_ref", "evidence_refs", "evidence_reference", "evidence_references"}
+DELTA_KEYS = {"decision_delta", "state_delta", "allocation_delta", "board_delta", "changed_state"}
+EFFECT_KEYS = {
+    "expected_metric_effect",
+    "expected_direct_effect",
+    "direct_metric_effect",
+    "direct_risk_effect",
+    "direct_uncertainty_effect",
+    "direct_waste_effect",
+    "metric_effect",
+    "risk_effect",
+    "uncertainty_effect",
+    "waste_effect",
+    "waste_reduction_effect",
+    "objective_effect",
+    "anti_goal_effect",
+    "risk_reduction",
+    "uncertainty_reduction",
+    "waste_avoided",
+    "saved_turns",
+    "avoided_overrun",
+}
+DECISION_KEYS = {
+    "steering_decision",
+    "outbound_steering",
+    "decision",
+    *DELTA_KEYS,
 }
 
 
@@ -114,6 +210,29 @@ def require_zero_metric(
         errors.append(f"anti-goal metric is not zero: {label}")
 
 
+def metric_values_from_records(records: list[dict[str, Any]], name_patterns: tuple[str, ...]) -> list[Any]:
+    values: list[Any] = []
+    for payload in records:
+        values.extend(metric_values(payload, name_patterns))
+    return values
+
+
+def require_positive_metric(
+    ledger: list[dict[str, Any]],
+    name_patterns: tuple[str, ...],
+    *,
+    minimum: float,
+    label: str,
+    errors: list[str],
+) -> None:
+    values = metric_values_from_records(ledger, name_patterns)
+    numeric_values = [numeric_value(value) for value in values]
+    if not values:
+        errors.append(f"ledger lacks steering value metric read: {label}")
+    elif not any(value is not None and value >= minimum for value in numeric_values):
+        errors.append(f"steering value metric is below {minimum:g}: {label}")
+
+
 def numeric_at(payload: Any, names: set[str]) -> float | None:
     if isinstance(payload, dict):
         for key, value in payload.items():
@@ -183,6 +302,31 @@ def load_payloads(path: Path, errors: list[str]) -> list[dict[str, Any]]:
     return payloads
 
 
+def worker_progress_record_refs(path: Path, store: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        rel_store_path = path.relative_to(store).as_posix()
+    except ValueError:
+        rel_store_path = path.name
+    bases = {
+        rel_store_path,
+        f".okra/runs/{TARGET_RUN_ID}/{rel_store_path}",
+    }
+    refs = set(bases)
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        seq = record.get("seq", lineno) if isinstance(record, dict) else lineno
+        for base in bases:
+            refs.add(f"{base}#seq={seq}")
+    return refs
+
+
 def run_stores(root: Path) -> list[Path]:
     target = root / "runs" / TARGET_RUN_ID
     return [target] if target.is_dir() else []
@@ -190,6 +334,116 @@ def run_stores(root: Path) -> list[Path]:
 
 def has_pattern(pattern: str, text: str) -> bool:
     return re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL) is not None
+
+
+def normalized_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+
+
+def keyed_values(payload: Any, keys: set[str]) -> list[tuple[str, Any]]:
+    values: list[tuple[str, Any]] = []
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            key_name = normalized_key(key)
+            if key_name in keys:
+                values.append((key_name, value))
+            values.extend(keyed_values(value, keys))
+    elif isinstance(payload, list):
+        for child in payload:
+            values.extend(keyed_values(child, keys))
+    return values
+
+
+def leaf_values(value: Any) -> list[Any]:
+    if isinstance(value, dict):
+        values: list[Any] = []
+        for child in value.values():
+            values.extend(leaf_values(child))
+        return values
+    if isinstance(value, list):
+        values: list[Any] = []
+        for child in value:
+            values.extend(leaf_values(child))
+        return values
+    return [value]
+
+
+def value_has_content(value: Any, *, reject_negative: bool = False) -> bool:
+    if isinstance(value, str) and not value.strip():
+        return False
+    if isinstance(value, (list, dict)) and not value:
+        return False
+    text = payload_text(value)
+    if text in {"", "null", "[]", "{}"}:
+        return False
+    if reject_negative and has_pattern(NEGATIVE_VALUE_PATTERN, text):
+        return False
+    return True
+
+
+def has_resolved_evidence_ref(payload: dict[str, Any], valid_refs: set[str]) -> bool:
+    if not valid_refs:
+        return False
+    ref_values = keyed_values(payload, EVIDENCE_KEYS)
+    for _, value in ref_values:
+        for leaf in leaf_values(value):
+            if not isinstance(leaf, (str, int, float)):
+                continue
+            ref = str(leaf).strip()
+            if ref in valid_refs:
+                return True
+    return False
+
+
+def has_complete_steering_value_evidence(payload: dict[str, Any]) -> bool:
+    effect_values = [value for _, value in keyed_values(payload, EFFECT_KEYS)]
+    signal_values = [value for _, value in keyed_values(payload, SIGNAL_KEYS)]
+    affected_values = [value for _, value in keyed_values(payload, AFFECTED_KEYS)]
+    evidence_values = [value for _, value in keyed_values(payload, EVIDENCE_KEYS)]
+    delta_values = [value for _, value in keyed_values(payload, DELTA_KEYS | DECISION_KEYS)]
+
+    return (
+        any(value_has_content(value, reject_negative=True) for value in effect_values)
+        and any(value_has_content(value) for value in signal_values)
+        and any(value_has_content(value) for value in affected_values)
+        and any(value_has_content(value) for value in evidence_values)
+        and any(value_has_content(value) for value in delta_values)
+    )
+
+
+def has_nontrivial_steering_intervention(payload: dict[str, Any]) -> bool:
+    for key, value in keyed_values(payload, DECISION_KEYS):
+        text = payload_text(value)
+        if not value_has_content(value) or has_pattern(NEGATED_DECISION_PATTERN, text):
+            continue
+        if key in DELTA_KEYS:
+            if (
+                not has_pattern(PASSIVE_DELTA_PATTERN, text)
+                and (
+                    has_pattern(NONTRIVIAL_DECISION_PATTERN, text)
+                    or has_pattern(SUBSTANTIVE_DELTA_PATTERN, text)
+                )
+            ):
+                return True
+            continue
+        if has_pattern(NONTRIVIAL_DECISION_PATTERN, text):
+            return True
+    return False
+
+
+def steering_value_patterns_stay_reachable() -> bool:
+    probe_text = payload_text(
+        {
+            "direct_metric_effect": "increase healthy_checkin_rate",
+            "affected_pkr": "pkr-checkin-delivery",
+            "evidence_ref": "workers/pkr/progress.jsonl#seq=1",
+        }
+    )
+    return (
+        has_pattern(VALUE_EFFECT_PATTERN, probe_text)
+        and has_pattern(AFFECTED_SCOPE_PATTERN, probe_text)
+        and has_pattern(EVIDENCE_REF_PATTERN, probe_text)
+    )
 
 
 def load_json_object(path: Path, errors: list[str], label: str) -> dict[str, Any]:
@@ -241,10 +495,12 @@ def check_one_run(store: Path) -> list[str]:
     checkins = load_payloads(store / "checkins.jsonl", errors)
     flags = load_payloads(store / "flags.jsonl", errors)
     worker_payloads: list[dict[str, Any]] = []
+    valid_worker_refs: set[str] = set()
     workers = store / "workers"
     if workers.exists():
         for path in sorted(workers.glob("*/progress.jsonl")):
             worker_payloads.extend(load_payloads(path, errors))
+            valid_worker_refs.update(worker_progress_record_refs(path, store))
 
     all_text = "\n".join(payload_text(payload) for payload in ledger + checkins + flags + worker_payloads)
     ledger_text = "\n".join(payload_text(payload) for payload in ledger)
@@ -354,12 +610,7 @@ def check_one_run(store: Path) -> list[str]:
         dkr_text,
     ):
         errors.append("DKR progress lacks decision target/unlock")
-    if dkr_payloads and not has_pattern(
-        r"\b(risk(?: if skipped)?|risk_if_skipped|anti[- ]goal uncertainty|anti[- ]goal risk|"
-        r"guardrail uncertainty|trap|traps|safe|safety|unsafe|harm|wall|veto|admissibility|"
-        r"avoid wasting|not wasting|waste)\b",
-        dkr_text,
-    ):
+    if dkr_payloads and not has_pattern(DKR_RISK_PATTERN, dkr_text):
         errors.append("DKR progress lacks risk or anti-goal uncertainty")
     if dkr_payloads and not has_pattern(r"\b(learning|evidence|answered|unanswered)\b", dkr_text):
         errors.append("DKR progress lacks learning/evidence content")
@@ -402,6 +653,46 @@ def check_one_run(store: Path) -> list[str]:
         r"\b(DKR|learning_checkpoint|checkpoint)\b", checkin_text
     ):
         errors.append("check-ins do not gate CKR/PKR promotion on DKR learning")
+
+    require_positive_metric(
+        ledger,
+        (
+            "steering_value_score",
+            "steering_value_rate",
+            "decision_value_score",
+            "checkin_value_score",
+            "valuable_steering_decision_count",
+            "steering_intervention_count",
+            "risk_reduction_event_count",
+            "allocation_change_count",
+        ),
+        minimum=0.75,
+        label="steering_value_score",
+        errors=errors,
+    )
+    require_zero_metric(
+        ledger,
+        (
+            "no_value_checkin_count",
+            "unvaluable_checkin_count",
+            "steering_theater_count",
+        ),
+        "no_value_checkin_count",
+        errors,
+    )
+
+    value_steering_checkins = [
+        payload
+        for payload in checkins
+        if has_complete_steering_value_evidence(payload)
+        and has_nontrivial_steering_intervention(payload)
+        and has_resolved_evidence_ref(payload, valid_worker_refs)
+    ]
+    if not value_steering_checkins:
+        errors.append("check-ins lack steering value evidence")
+
+    if not any(has_nontrivial_steering_intervention(payload) for payload in checkins):
+        errors.append("check-ins lack nontrivial steering intervention")
 
     if not has_pattern(r"\b(cannot|budget_exhausted|budget exhausted|stop rule|stop_rule|pause)\b", all_text):
         errors.append("run lacks DKR budget exhaustion stop/escalation rule")
@@ -461,6 +752,29 @@ def calibrate(root: Path) -> int:
     generic_id_probe = {"id": "unsteered_worker_edge_count", "value": 0}
     if metric_values(generic_id_probe, ("unsteered_worker_edge_count",)):
         failures.append("probe: generic id should not be treated as a metric identity")
+
+    dkr_schema_probe = {
+        "type": "dkr_worker_progress",
+        "risk_or_anti_goal_uncertainty_reduced": "open question",
+    }
+    if not has_pattern(DKR_RISK_PATTERN, payload_text(dkr_schema_probe)):
+        failures.append("probe: DKR risk_or_anti_goal_uncertainty_reduced should satisfy risk evidence")
+
+    value_schema_probe = {
+        "type": "steering_checkin",
+        "worker_progress_refs": [{"worker_id": "dkr-1"}],
+        "steering_value_evidence": {
+            "affected_scope": ["ckr-a", "pkr-a"],
+            "inbound_signal": "DKR confidence crossed threshold",
+            "decision_delta": "promoted CKR and funded PKR",
+            "expected_direct_effect": "reduced uncertainty and avoided wasted work",
+            "evidence_ref": "workers/dkr-1/progress.jsonl#seq=1",
+        },
+    }
+    if not has_complete_steering_value_evidence(value_schema_probe):
+        failures.append("probe: steering_value_evidence should satisfy value evidence")
+    if not steering_value_patterns_stay_reachable():
+        failures.append("probe: direct effect and affected PKR variants should satisfy value regexes")
 
     if failures:
         print("okra check-in steering calibration failed:", file=sys.stderr)

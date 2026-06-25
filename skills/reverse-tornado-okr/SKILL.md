@@ -212,6 +212,12 @@ For delegated subagent work, make check-ins both event-based and time-based: wor
 unknown discovery, flag opening, and a default ten-minute heartbeat for long-running workers. Each
 check-in recollects DKR learning, reads file-based worker progress reports, updates CKR/PKR
 candidate status, and decides whether to continue, spawn discovery, pause, or escalate.
+Each steering check-in must also show its value, not just that it happened: the inbound signal it
+consumed, the decision/state/allocation change it made, and the expected or direct objective,
+anti-goal, uncertainty, or waste-reduction effect. Track this with a steering-value metric such as
+`steering_value_score` or `valuable_steering_decision_count`, plus a zero-valued anti-goal such as
+`no_value_checkin_count == 0`. A check-in that only says "continue" without evidence of why that was
+the right steering move is process theater, not loop control.
 
 For the operating-loop fields, lag handling, and flag lifecycle, read
 `references/operating-loop.md`.
@@ -376,16 +382,36 @@ For delegated loops, make these four lines explicit in the artifact:
 - The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the
   objective metric reaches target or a human/blocking flag stops the loop. Use the exact phrase
   **"until the objective metric reaches target"** once, then instantiate it with the domain target.
+- Include one compact line that starts **"Action envelope:"** and names allowed moves, forbidden
+  actions, approval gates, and the human ratification boundary.
 - DKRs are scoped discovery-worker probes with budgets, probability/confidence outputs, a named
   steering decision to unlock, and explicit risk/anti-goal uncertainty to reduce.
 - CKR/PKR candidates are not promoted until the orchestrator accepts a DKR learning checkpoint.
   Use the exact sentence: **"Candidate CKRs and candidate PKRs are not promoted until the
   orchestrator accepts the supporting DKR learning checkpoint."**
 - CKRs are measurable contribution context with mini reverse-tornado discovery/delivery balance,
-  not subagent work.
+  not subagent work. For each CKR, include one compact line that starts
+  **"CKR-level discovery/delivery balance:"** and names both the discovery side and the delivery
+  path.
 - PKRs are progression-worker execution units and must report progress signals at check-ins.
 - Long-running workers write file-based progress reports under `.okra/runs/<run-id>/workers/` and
-  use a timed heartbeat, defaulting to ten minutes when the human has not set a cadence.
+  use a timed heartbeat, defaulting to ten minutes when the human has not set a cadence. Include one
+  compact line that starts **"Heartbeat cadence and next_check_at:"** and contains both the cadence
+  and the next scheduled check.
+- Steering check-ins record value evidence: inbound signal, decision delta, affected CKR/PKR/DKR or
+  allocation, expected/direct metric or risk effect, and a freshness or evidence reference. Also
+  append a steering-value ledger metric read, such as `steering_value_score >= 0.75` or
+  `valuable_steering_decision_count >= 1`; do not leave steering value only in prose.
+
+For delegated loops, include a compact **Eval Points** section with these exact labels instantiated
+for the current goal:
+
+- **Admissibility before action**: the orchestrator screens objective moves against fresh anti-goal
+  readings or a dry-run before dispatch.
+- **Direct read after action**: the loop reads the real objective, CKR, and anti-goal metrics from
+  source records after workers return.
+- **Paired goal/anti-goal eval**: the loop checks objective progress and anti-goal hold together;
+  success requires both the objective target and every anti-goal threshold to hold.
 
 For delegated loops with storage, also state the exact frame/tree schema in the artifact or records:
 frame keys `frame_version`, `frame_hash`, `objective`, `anti_goals`, `metric_contracts`,
