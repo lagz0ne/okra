@@ -99,6 +99,18 @@ def missing_requirements(text: str) -> list[str]:
             r"altering? refund policy|alter refund policy|spending money|spend money|"
             r"changing analytics definitions|change analytics definitions)[\s\S]{0,900}"
             r"(break-glass|relaxation|relaxing [^.\n]{0,120}threshold|threshold)"
+            r"|"
+            r"(?=[\s\S]*(emailing? customers|email customers|change pricing|changing pricing|deploying? code|deploy code|"
+            r"altering? refund policy|alter refund policy|spending money|spend money|"
+            r"changing analytics definitions|change analytics definitions)[^.\n]{0,360}"
+            r"(forbidden|not allowed|may not|must not|vetoed?|escalated?|human approval|explicit human approval)|"
+            r"(forbidden|not allowed|may not|must not|vetoed?|escalated?|human approval|explicit human approval)"
+            r"[^.\n]{0,360}(emailing? customers|email customers|change pricing|changing pricing|deploying? code|"
+            r"deploy code|altering? refund policy|alter refund policy|spending money|spend money|"
+            r"changing analytics definitions|change analytics definitions))"
+            r"(?=[\s\S]*(break-glass|break glass|relaxation|relaxing [^.\n]{0,160}threshold|"
+            r"threshold [^.\n]{0,200}(?:human|approval|break-glass|break glass)|"
+            r"(?:human|approval|break-glass|break glass) [^.\n]{0,200}threshold))"
             r")",
             "artifact must enforce the fixture's forbidden actions and break-glass threshold rule",
         ),

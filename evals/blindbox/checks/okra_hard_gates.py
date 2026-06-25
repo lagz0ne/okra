@@ -359,9 +359,14 @@ def cascade_scoreboard(text: str, stats: Stats) -> Violation | None:
 
 def boundary_drift(text: str, stats: Stats) -> Violation | None:
     bad_patterns = [
-        r"\b(agent|loop|orchestrator|model)\b[\s\S]{0,120}\b(can|may|should|will)\b"
-        r"[\s\S]{0,120}\b(change|adjust|relax|redefine|retune|switch)\b"
-        r"[\s\S]{0,120}\b(objective|target|threshold|anti[- ]goal|guardrail|metric|action envelope)\b",
+        r"\b(agent|loop|orchestrator|model)\b[^.]{0,120}\b(can|may|should|will)\b"
+        r"[^.]{0,120}\b(change|adjust|relax|redefine|retune|switch)\b"
+        r"[^.]{0,120}\b(objective|target|threshold|anti[- ]goal|guardrail|metric|action envelope)\b",
+        r"\b(agent|loop|orchestrator|model)\b[^.]{0,120}\.[^.]{0,120}"
+        r"\b(it|they|the loop|the agent|the orchestrator|the model)\b[^.]{0,120}"
+        r"\b(can|may|should|will)\b[^.]{0,120}"
+        r"\b(change|adjust|relax|redefine|retune|switch)\b[^.]{0,120}"
+        r"\b(objective|target|threshold|anti[- ]goal|guardrail|metric|action envelope)\b",
         r"\b(change|adjust|relax|redefine|retune|switch)\b[\s\S]{0,120}"
         r"\b(objective|target|threshold|anti[- ]goal|guardrail|metric|action envelope)\b"
         r"[\s\S]{0,120}\b(if needed|automatically|without approval|when progress is slow)\b",
@@ -556,6 +561,16 @@ def calibrate(root: Path) -> int:
         if expected_code and expected_code not in {violation.code for violation in violations}:
             codes = ", ".join(violation.code for violation in violations)
             failures.append(f"{path}: expected violation {expected_code}, got: {codes}")
+
+    soft_wrap_drift = "The human owns the frame. The orchestrator may\nchange the anti-goal threshold."
+    if boundary_drift(soft_wrap_drift, gather_stats(soft_wrap_drift)) is None:
+        failures.append("probe: soft-wrapped orchestrator frame change should trip boundary_drift")
+    human_only_resume = (
+        "Lifecycle: open -> resolved. The orchestrator may resume only inside the recorded resolution. "
+        "Goal-switching and any frame change are human-only; the human decides."
+    )
+    if boundary_drift(human_only_resume, gather_stats(human_only_resume)) is not None:
+        failures.append("probe: human-only frame change sentence should not trip boundary_drift")
 
     if failures:
         print("okra hard-gate calibration failed:", file=sys.stderr)

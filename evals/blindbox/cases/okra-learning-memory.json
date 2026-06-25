@@ -1,0 +1,40 @@
+{
+  "id": "okra-learning-memory",
+  "description": "A blindbox case where an agent must turn prior OKRA runs into governed, context-specific learning memory without automatic frame changes.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "okra-learning-memory",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-learning-memory.md. Treat this as a delegated OKRA loop design for making future OKRA runs self-learning, self-healing, and self-optimizing under stress. The objective is `learning_memory_reuse_acceptance_rate >= 0.85` across scored OKRA runs in this project. Stress means time/turn/DKR budget pressure while the loop must still avoid anti-goal violations and either reach the objective or report clear evidence that it cannot. Use previous-run notes in this fixture as automatic inputs: scan/load them into the candidate frame and DKR allocation, but do not treat them as automatic authority. The artifact must define OKRA-specific learning memory for this project, not generic assistant memory: extract traps, avoidances, misconceptions, optimizations, and reusable candidate anti-goals from prior DKR checkpoints, flags, vetoes, worker unknowns, and metric outcomes. Every learned anti-goal must have a metric and remain candidate-only until current evidence supports it and the human ratifies it. Make the orchestrator the allocator under stress: DKR is the learning allocator for deciding whether to promote, fund, dry-run, veto, pause, re-aim, or raise cannot; CKR remains measurable contribution context; PKR is progress work with signals. Include DKR budgets, probability/confidence outputs, and a DKR learning checkpoint accepted by the orchestrator before CKR/PKR candidates are promoted. Define anti-goals with metrics: `prior_run_scan_miss_count == 0`, `unratified_memory_promotion_count == 0`, `eval_regression_count == 0`, `single_llm_truth_acceptance_count == 0`, and `stale_learning_reuse_count == 0`. Include no-regression evidence so evals must not be worse, and include independent/deterministic evidence so no single LLM truth is accepted. Define all four flags and show how cannot/breaking/pointless/authority_drift drive self-healing repair, pause, or human escalation. Do not implement product code or create anything outside tasks/okra-learning-memory.md.",
+  "allowed_paths": [
+    "tasks/okra-learning-memory.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/okra-learning-memory.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "tasks/okra-learning-memory.md",
+      "contains": [
+        "learning_memory_reuse_acceptance_rate",
+        "prior_run_scan_miss_count",
+        "unratified_memory_promotion_count",
+        "eval_regression_count",
+        "single_llm_truth_acceptance_count",
+        "stale_learning_reuse_count"
+      ]
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/okra-learning-memory.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/okra-learning-memory.md"
+    },
+    {
+      "type": "okra_learning_memory",
+      "path": "tasks/okra-learning-memory.md"
+    }
+  ]
+}

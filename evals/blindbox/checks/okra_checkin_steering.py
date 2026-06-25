@@ -79,18 +79,12 @@ def numeric_value(value: Any) -> float | None:
 def metric_values(payload: Any, name_patterns: tuple[str, ...]) -> list[Any]:
     values: list[Any] = []
     if isinstance(payload, dict):
-        metric_name = next(
-            (
-                str(payload.get(key)).lower()
-                for key in ("metric", "name", "metric_name", "anti_goal", "anti_goal_metric")
-                if payload.get(key) is not None
-            ),
-            "",
-        )
-        if metric_name and any(pattern in metric_name for pattern in name_patterns):
-            value = payload.get("value")
-            if is_metric_scalar(value):
-                values.append(value)
+        for identity_key in ("metric", "metric_id", "metric_name", "anti_goal", "anti_goal_metric", "name"):
+            metric_name = str(payload.get(identity_key, "")).lower()
+            if metric_name and any(pattern in metric_name for pattern in name_patterns):
+                value = payload.get("value")
+                if is_metric_scalar(value):
+                    values.append(value)
         for key, value in payload.items():
             key_lower = key.lower()
             if any(pattern in key_lower for pattern in name_patterns):
@@ -460,6 +454,13 @@ def calibrate(root: Path) -> int:
             failures.append(
                 f"{workspace}: expected violation matching {expected!r}, got: {', '.join(errors[:5])}"
             )
+
+    metric_probe = {"metric_id": "opaque-record-id", "metric_name": "unsteered_worker_edge_count", "value": 0}
+    if metric_values(metric_probe, ("unsteered_worker_edge_count",)) != [0]:
+        failures.append("probe: metric_name should be considered when metric_id is opaque")
+    generic_id_probe = {"id": "unsteered_worker_edge_count", "value": 0}
+    if metric_values(generic_id_probe, ("unsteered_worker_edge_count",)):
+        failures.append("probe: generic id should not be treated as a metric identity")
 
     if failures:
         print("okra check-in steering calibration failed:", file=sys.stderr)

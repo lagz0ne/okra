@@ -45,9 +45,9 @@ Pin two things before any planning:
 Anti-goals can be reusable across runs. When the user has not named one, propose candidate
 anti-goals from the current skill and any available past run context: budget/spend, quality, trust,
 safety, privacy/data boundaries, authority drift, time/DKR budget, storage integrity, and
-single-LLM-truth acceptance. Pick the ones that match the current goal and give each a metric.
-The user may add, remove, or alter anti-goals; treat that as healthy frame negotiation, then freeze
-only the human-ratified set.
+eval regression, stale or unproven learning-memory reuse, and single-LLM-truth acceptance. Pick the
+ones that match the current goal and give each a metric. The user may add, remove, or alter
+anti-goals; treat that as healthy frame negotiation, then freeze only the human-ratified set.
 
 Why the anti-goal matters: the cheapest way to hit almost any objective is to wreck something
 unmeasured. Sales rises fastest by blowing the budget. The anti-goal is the wall that stops the
@@ -216,6 +216,40 @@ candidate status, and decides whether to continue, spawn discovery, pause, or es
 For the operating-loop fields, lag handling, and flag lifecycle, read
 `references/operating-loop.md`.
 
+## Step 2e - Learn, heal, and optimize from OKRA memory
+
+A serious OKRA loop should improve under stress. Here, **stress** means time, turn, budget, or
+attention pressure while the loop must still avoid anti-goal violations and either reach the
+objective or produce clear evidence that it cannot. The orchestrator owns allocation under that
+stress: it spends DKR budget where uncertainty blocks safer steering, holds or promotes candidate
+CKRs/PKRs only after accepted learning checkpoints, enforces PKR progress signals, and vetoes moves
+whose anti-goal cost is too high. It may re-rank, fund, hold, or stop work inside the ratified frame;
+it does not change the frame.
+
+Treat DKR as the loop's learning allocator, not as background research. Each DKR should reduce the
+next allocation decision: which path to fund, which candidate CKR/PKR to promote, which move to
+dry-run, which branch to pause, which anti-goal uncertainty to inspect, or when to raise `cannot`.
+That is how the loop self-heals: flags, vetoes, flat metrics, worker unknowns, and budget exhaustion
+become new steering evidence instead of silent failure.
+
+At check-ins and at end-of-run, extract OKRA-specific learning records: traps hit or nearly hit,
+avoidances/vetoes that worked, misconceptions corrected, optimization candidates, reusable
+candidate anti-goals, source run references, evidence hashes or metric reads, confidence, context
+where the learning applies, and no-regression evidence. Run-local learning repairs the current loop;
+cross-run learning seeds the next loop's candidate frame, anti-goals, DKR probes, and action
+envelope. Previous-run memories are automatic inputs, not automatic authority: load them when
+available, but keep them candidate-only until the current run has evidence and the human ratifies
+any frame or guardrail change.
+
+This is not generic memory. It is memory optimized for running OKRs in a particular context. Accept
+a learned anti-goal or optimization only when backed by deterministic evidence, append-only store
+records, hashes, changed-path or eval results, human ratification, or independent review. If reuse
+would make evals worse, rests on one LLM's narrative, lacks current-context fit, or tries to alter a
+human-owned frame without ratification, hold it as a candidate and open the right flag.
+
+For the learning-memory record shape and no-regression gates, read
+`references/learning-memory.md`.
+
 ## Step 3 - The cardinal rule: no cascade
 
 The tree of work is **scaffolding, not scoreboard**. The only score that counts is the **direct
@@ -331,6 +365,12 @@ and what gets updated at every turn or timed heartbeat. Include the current metr
 classification, keeping `observed_at`, `recorded_at`, `fresh` or `stale`, and `max_age` in the same
 table row or sentence.
 
+When the goal will recur in the same project, also deliver an **OKRA Learning Memory** section:
+previous-run inputs scanned, traps, avoidances, misconceptions, optimization candidates, reusable
+candidate anti-goals with metrics, evidence or hashes, confidence, context fit, ratification status,
+and no-regression / no-single-LLM-truth evidence. State which memories are automatic candidates and
+which, if any, the human ratified for this run.
+
 For delegated loops, make these four lines explicit in the artifact:
 
 - The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the
@@ -388,3 +428,7 @@ single file, no external runtime, no decoration that does not carry meaning).
 - Treating a hand-edited progress summary as source of truth instead of generating it from
   append-only storage records.
 - Treating one LLM's self-report as truth without independent evidence.
+- Treating previous-run memory as automatic authority instead of candidate evidence for the
+  orchestrator and human to ratify.
+- Storing generic notes instead of OKRA-specific traps, avoidances, misconceptions, optimizations,
+  candidate anti-goals, and no-regression evidence.

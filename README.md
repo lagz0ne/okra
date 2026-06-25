@@ -25,6 +25,7 @@ It produces:
 - three-point anti-goal evaluation
 - escalation flags and human-owned frame
 - operating-loop cadence for recurring or automated runs
+- OKRA learning memory for recurring project contexts
 
 For real-life runs, the skill requires metric freshness contracts, heartbeat cadence, lag windows,
 flag lifecycle, action envelope, and idempotent storage.
@@ -71,6 +72,13 @@ Run a real isolated eval when Claude/Codex credentials are available:
 ```sh
 CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case real-life-operations
+```
+
+For the cross-run learning-memory case:
+
+```sh
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
+scripts/run-blindbox.sh --agent both --case okra-learning-memory
 ```
 
 The runner copies a fixture into `.runs/`, injects the skill into a disposable workspace, launches

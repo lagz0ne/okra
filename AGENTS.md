@@ -47,6 +47,8 @@ scripts/run-blindbox.sh --agent both --case okra-self-harness
 CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case real-life-operations
 CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
+scripts/run-blindbox.sh --agent both --case okra-learning-memory
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-storage-governance
 CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-checkin-steering

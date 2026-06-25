@@ -487,6 +487,7 @@ def validate_cases() -> list[str]:
         "okra_hard_gates",
         "okra_store_governance",
         "okra_checkin_steering",
+        "okra_learning_memory",
         "operations_stale_metrics",
     }
     for case in load_cases(None):
@@ -751,6 +752,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         ("operations_stale_metrics.py", "operations-stale-metrics"),
         ("okra_store_governance.py", "okra-store-governance"),
         ("okra_checkin_steering.py", "okra-checkin-steering"),
+        ("okra_learning_memory.py", "okra-learning-memory"),
     ]
     for checker_name, golden_name in calibrated_checkers:
         checker = CHECKERS_DIR / checker_name
@@ -1692,6 +1694,26 @@ def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_time
                     detail = proc.stdout.strip()
                 except subprocess.TimeoutExpired:
                     detail = f"checker timeout after {check_timeout} seconds"
+        elif check.get("type") == "okra_learning_memory":
+            script = CHECKERS_DIR / "okra_learning_memory.py"
+            if not path.exists():
+                detail = "missing file"
+            elif not script.exists():
+                detail = f"missing checker: {script}"
+            else:
+                try:
+                    proc = subprocess.run(
+                        [sys.executable, str(script), str(path)],
+                        cwd=workspace,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        timeout=check_timeout,
+                    )
+                    passed = proc.returncode == 0
+                    detail = proc.stdout.strip()
+                except subprocess.TimeoutExpired:
+                    detail = f"checker timeout after {check_timeout} seconds"
         elif check.get("type") == "operations_stale_metrics":
             script = CHECKERS_DIR / "operations_stale_metrics.py"
             if not path.exists():
@@ -1741,6 +1763,9 @@ def input_hashes(case: dict[str, Any], prompt: str) -> dict[str, Any]:
             checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
         elif checker_type == "okra_checkin_steering":
             script = CHECKERS_DIR / "okra_checkin_steering.py"
+            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+        elif checker_type == "okra_learning_memory":
+            script = CHECKERS_DIR / "okra_learning_memory.py"
             checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
         elif checker_type == "operations_stale_metrics":
             script = CHECKERS_DIR / "operations_stale_metrics.py"
