@@ -52,14 +52,18 @@ CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-checkin-steering
 ```
 
-The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace plus per-run agent home, cache, and output directories as writable during execution; runtime scratch directories are scrubbed after the agent exits, and archived prompt and command packets are kept outside writable sandbox mounts. Selected system/tool paths are read-only. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
+The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace plus `.runs/blindbox/<run>/runtime/` as writable during execution; runtime contains the per-run agent home, cache, Codex home, and agent output scratch. Runtime scratch is scrubbed after the agent exits, and archived prompt, command, progress, final, and result packets are kept outside writable sandbox mounts. Selected system/tool paths are read-only. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
 
 The bwrap environment is cleared before launch, then the runner sets only the per-run HOME, cache,
 PATH, and locale variables it needs. Agent auth files are still mounted read-only when required for
 model access, so scored runs should use trusted fixtures/prompts or eval-scoped credentials. Results
 record input hashes, requested model labels, CLI version, allowed-path checks, and checker timeouts.
-The credential artifact audit scans preserved run artifacts; runtime home/cache/output scratch
-directories are scrubbed as containment and are not treated as preserved evidence after deletion.
+The runtime cleanup check verifies `.runs/blindbox/<run>/runtime/` was removed after execution. The
+credential artifact audit scans preserved run artifacts outside that directory. Runtime
+auth/home/cache/output scratch is controlled by the single `runtime/` directory, ignored by the
+preserved-artifact credential check and run-tree hashes, and scrubbed as containment after each
+agent exits. If scrub fails and `runtime/` remains, the runtime cleanup check scans and hashes the
+leftover scratch before failing the run.
 
 Do not use `--isolation none` for scored runs. The runner refuses it unless `--allow-unisolated`
 is passed because unisolated workspaces can read the repo-local eval cases and checkers, and this
@@ -79,11 +83,16 @@ Run both agent review paths before claiming changes to the skill, runner, evals,
 scripts/review-skill.sh --agent both
 ```
 
-For a Codex diff-focused review, use:
+For a diff-focused review, use:
 
 ```sh
-scripts/review-skill.sh --agent codex --mode diff
+scripts/review-skill.sh --agent both --mode diff
 ```
+
+The Claude diff path receives a precomputed `diff-context.txt` artifact because its review tool
+surface is read-only. Diff mode reviews the working tree and index against `HEAD`; it is not a
+branch-vs-main review. Untracked file contents are not embedded in `diff-context.txt`; reviewers
+must read listed safe untracked paths directly before signing off.
 
 Review outputs land in `.runs/review/`. Address critical findings before merging the workflow into future skill work.
 The Claude review path is intentionally read-only by tool surface; use normal development commands, not the review wrapper, when applying fixes.

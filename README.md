@@ -69,11 +69,15 @@ The repo-local skill links are:
 Run a real isolated eval when Claude/Codex credentials are available:
 
 ```sh
+CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case real-life-operations
 ```
 
 The runner copies a fixture into `.runs/`, injects the skill into a disposable workspace, launches
 the selected agent through `bwrap`, and preserves prompts, logs, outputs, hashes, and check results.
+Writable agent scratch lives under each run's `runtime/` directory, is checked for post-run cleanup,
+and is excluded from preserved-artifact credential scans after cleanup. If cleanup fails, the
+leftover `runtime/` tree is scanned and hashed by the cleanup check.
 
 ## Review
 
@@ -84,6 +88,8 @@ scripts/review-skill.sh --agent both
 ```
 
 Review outputs land under `.runs/review/`.
+In diff mode, untracked file contents are not embedded in the Claude diff context; reviewers read
+listed safe untracked paths directly when needed.
 
 ## Release
 

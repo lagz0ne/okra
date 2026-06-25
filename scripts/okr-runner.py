@@ -27,11 +27,14 @@ REVIEW_PROMPT = REPO_ROOT / "evals" / "review" / "skill-review.md"
 RUN_ROOT = REPO_ROOT / ".runs"
 BWRAP_WORKSPACE = "/tmp/workspace"
 BWRAP_RUNS = "/tmp/runs"
+BWRAP_RUNTIME = f"{BWRAP_RUNS}/runtime"
 CHECKERS_DIR = REPO_ROOT / "evals" / "blindbox" / "checks"
 GOLDEN_DIR = REPO_ROOT / "evals" / "blindbox" / "golden"
 CHECK_TIMEOUT = 60
 DEFAULT_HEARTBEAT_SECONDS = 30
 MAX_SECRET_SCAN_BYTES = 5 * 1024 * 1024
+MAX_DIFF_CONTEXT_FILE_BYTES = 512 * 1024
+RUNTIME_DIR_NAME = "runtime"
 QUICK_VALIDATE = (
     Path.home()
     / ".codex"
@@ -51,8 +54,9 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
     (
         "env_secret_assignment",
         re.compile(
-            rb"(?i)\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD)[A-Z0-9_]*"
-            rb"\s*=\s*[\"']?[A-Za-z0-9._~:/+=-]{20,}"
+            rb"\b[A-Z0-9_]*(?:API[_-]?KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD)[A-Z0-9_]*"
+            rb"\s*=\s*(?:[\"'][^\"'\s]{20,}[\"']?|"
+            rb"[A-Za-z0-9._~:/+=-]{20,}(?![A-Za-z0-9._~:/+=-]))"
         ),
     ),
     (
@@ -61,10 +65,21 @@ SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
             rb'(?i)"(?:access|refresh|session|id|api|auth)[_-]?(?:token|secret|key)"\s*:\s*"[^"\s]{20,}"'
         ),
     ),
+    ("json_private_key", re.compile(rb'(?i)"private_key"\s*:\s*"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----')),
+    ("private_key_block", re.compile(rb"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")),
 )
 STRUCTURED_CREDENTIAL_EXTS = {".json", ".toml", ".yaml", ".yml", ".env", ".ini", ".conf", ".config", ".properties"}
 TRANSCRIPT_CREDENTIAL_EXTS = {".md", ".log", ".txt"}
 SNAPSHOT_EXCLUDED_DIRS = {".git", "__pycache__"}
+SENSITIVE_UNTRACKED_NAME = re.compile(
+    r"(?i)(^|[/_.-])(?:id_rsa|id_dsa|id_ecdsa|id_ed25519|private[_-]?key|"
+    r"service[_-]?account|credentials?|secrets?|token|kubeconfig)(?:$|[/_.-])"
+)
+SENSITIVE_UNTRACKED_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
+PRIVATE_KEY_BLOCK_TEXT = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 class RunnerError(RuntimeError):
@@ -117,7 +132,7 @@ def sha256_text(value: str) -> str:
     return sha256_bytes(value.encode("utf-8"))
 
 
-def sha256_path(path: Path) -> str:
+def sha256_path(path: Path, *, exclude_top_level: set[str] | None = None) -> str:
     digest = hashlib.sha256()
     if path.is_symlink():
         digest.update(b"symlink\0")
@@ -127,9 +142,12 @@ def sha256_path(path: Path) -> str:
         digest.update(path.read_bytes())
         return digest.hexdigest()
     for child in sorted(path.rglob("*")):
+        rel_path = child.relative_to(path)
+        if exclude_top_level and rel_path.parts and rel_path.parts[0] in exclude_top_level:
+            continue
         if "__pycache__" in child.parts:
             continue
-        rel = child.relative_to(path).as_posix()
+        rel = rel_path.as_posix()
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         if child.is_symlink():
@@ -142,6 +160,48 @@ def sha256_path(path: Path) -> str:
             continue
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def safe_sha256_path(path: Path, *, exclude_top_level: set[str] | None = None) -> tuple[str | None, str | None]:
+    try:
+        return sha256_path(path, exclude_top_level=exclude_top_level), None
+    except OSError as exc:
+        return None, str(exc)
+
+
+def matched_secret_pattern(data: bytes) -> str | None:
+    for name, pattern in SECRET_PATTERNS:
+        if pattern.search(data):
+            return name
+    return None
+
+
+def bounded_context_text(text: str, *, limit: int = MAX_DIFF_CONTEXT_FILE_BYTES) -> str:
+    text = PRIVATE_KEY_BLOCK_TEXT.sub("[redacted block: private_key_block]", text)
+    lines: list[str] = []
+    for line in text.splitlines():
+        matched_secret = matched_secret_pattern(line.encode("utf-8", errors="replace"))
+        if matched_secret:
+            lines.append(f"[redacted line: matched {matched_secret}]")
+        else:
+            lines.append(line)
+    redacted_text = "\n".join(lines)
+    data = redacted_text.encode("utf-8", errors="replace")
+    if len(data) <= limit:
+        return redacted_text.rstrip()
+    truncated = data[:limit].decode("utf-8", errors="replace").rstrip()
+    return f"{truncated}\n[truncated: {len(data) - limit} bytes omitted]"
+
+
+def is_sensitive_untracked_path(rel: str) -> bool:
+    path = Path(rel)
+    name = path.name.lower()
+    return (
+        name == ".env"
+        or name.startswith(".env.")
+        or path.suffix.lower() in SENSITIVE_UNTRACKED_SUFFIXES
+        or bool(SENSITIVE_UNTRACKED_NAME.search(rel))
+    )
 
 
 def workspace_snapshot(workspace: Path) -> dict[str, str]:
@@ -383,6 +443,26 @@ def skill_path(name: str = DEFAULT_SKILL) -> Path:
     return path
 
 
+def runtime_dir(run_dir: Path) -> Path:
+    return run_dir / RUNTIME_DIR_NAME
+
+
+def runtime_home(run_dir: Path) -> Path:
+    return runtime_dir(run_dir) / "home"
+
+
+def runtime_cache(run_dir: Path) -> Path:
+    return runtime_dir(run_dir) / "cache"
+
+
+def runtime_agent_output(run_dir: Path) -> Path:
+    return runtime_dir(run_dir) / "agent-output"
+
+
+def runtime_codex_home(run_dir: Path) -> Path:
+    return runtime_dir(run_dir) / "codex-home"
+
+
 def load_cases(selected: list[str] | None) -> list[dict[str, Any]]:
     case_files = sorted(CASES_DIR.glob("*.json"))
     cases: list[dict[str, Any]] = []
@@ -605,6 +685,39 @@ def validate_store_helper_behavior(*, dry_run: bool = False) -> int:
     return 0
 
 
+def validate_secret_patterns(*, dry_run: bool = False) -> int:
+    print_cmd(["secret-patterns", "--calibrate"])
+    if dry_run:
+        return 0
+    positives = {
+        "env_digits": b"API_TOKEN=abcdefghijklmnopqrstuvwxyz123456",
+        "env_alpha": b"SESSION_TOKEN=abcdefghijklmnopqrstuvwx",
+        "env_underscore": b"TOKEN=my_secret_token_value_here",
+        "env_parenthetical": b"TOKEN=abcdefghij1234567890 (rotated)",
+        "openai": b"sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+        "private_key": b"-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+        "json_private_key": b'{"private_key":"-----BEGIN PRIVATE KEY-----\\nabc"}',
+    }
+    negatives = {
+        "function_call": b"matched_secret = matched_secret_pattern(data)",
+        "model_env": b"CODEX_MODEL=gpt-5.5",
+        "short_assignment": b"API_TOKEN=short",
+    }
+    failures = 0
+    for label, data in positives.items():
+        if matched_secret_pattern(data) is None:
+            print(f"secret pattern positive missed: {label}", file=sys.stderr)
+            failures += 1
+    for label, data in negatives.items():
+        matched = matched_secret_pattern(data)
+        if matched is not None:
+            print(f"secret pattern negative matched: {label} -> {matched}", file=sys.stderr)
+            failures += 1
+    if not failures:
+        print("secret pattern calibration ok")
+    return failures
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     failures = 0
     for path in sorted((REPO_ROOT / "skills").iterdir()):
@@ -664,6 +777,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
     )
     failures += validate_store_helper_behavior(dry_run=args.dry_run)
+    failures += validate_secret_patterns(dry_run=args.dry_run)
 
     case_errors = validate_cases()
     for error in case_errors:
@@ -709,9 +823,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ) as run_tmp:
                 workspace = Path(workspace_tmp)
                 run_dir = Path(run_tmp)
-                (run_dir / "home").mkdir(parents=True, exist_ok=True)
-                (run_dir / "cache").mkdir(parents=True, exist_ok=True)
-                (run_dir / "agent-output").mkdir(parents=True, exist_ok=True)
+                runtime_home(run_dir).mkdir(parents=True, exist_ok=True)
+                runtime_cache(run_dir).mkdir(parents=True, exist_ok=True)
+                runtime_agent_output(run_dir).mkdir(parents=True, exist_ok=True)
+                runtime_codex_home(run_dir).mkdir(parents=True, exist_ok=True)
                 code = run_checked(
                     bwrap_prefix(workspace, run_dir)
                     + [
@@ -734,6 +849,96 @@ def review_prompt(mode: str) -> str:
         f"Canonical skill: {skill_path()}\n"
         f"Review mode: {mode}\n"
     )
+
+
+def write_diff_context(out_dir: Path) -> Path:
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    diff = subprocess.run(
+        ["git", "diff", "--", "."],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    cached_diff = subprocess.run(
+        ["git", "diff", "--cached", "--", "."],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=30,
+    )
+    untracked_sections: list[str] = []
+    if untracked.returncode == 0:
+        for rel in sorted(line for line in untracked.stdout.splitlines() if line.strip()):
+            if is_sensitive_untracked_path(rel):
+                untracked_sections.append(f"## {rel}\n[skipped: credential-looking path]")
+                continue
+            raw_path = REPO_ROOT / rel
+            if raw_path.is_symlink():
+                untracked_sections.append(f"## {rel}\n[symlink: {os.readlink(raw_path)}]")
+                continue
+            path = raw_path.resolve(strict=False)
+            if REPO_ROOT not in path.parents and path != REPO_ROOT:
+                untracked_sections.append(f"## {rel}\n[skipped: path escapes repository]")
+                continue
+            if not path.is_file():
+                untracked_sections.append(f"## {rel}\n[skipped: not a regular file]")
+                continue
+            size = path.stat().st_size
+            if size > MAX_DIFF_CONTEXT_FILE_BYTES:
+                untracked_sections.append(f"## {rel}\n[skipped: {size} bytes exceeds diff context limit]")
+                continue
+            untracked_sections.append(f"## {rel}\n[untracked file: {size} bytes; content not embedded]")
+    else:
+        untracked_sections.append(bounded_context_text(untracked.stdout))
+    out_file = out_dir / "diff-context.txt"
+    out_file.write_text(
+        "\n".join(
+            [
+                "$ git status --short",
+                bounded_context_text(status.stdout),
+                f"[exit {status.returncode}]",
+                "",
+                "$ git diff -- .",
+                bounded_context_text(diff.stdout),
+                f"[exit {diff.returncode}]",
+                "",
+                "$ git diff --cached -- .",
+                bounded_context_text(cached_diff.stdout),
+                f"[exit {cached_diff.returncode}]",
+                "",
+                "$ git ls-files --others --exclude-standard",
+                bounded_context_text(untracked.stdout),
+                f"[exit {untracked.returncode}]",
+                "",
+                "# Untracked file review",
+                "Untracked file contents are not embedded in this artifact. For review completeness,",
+                "read each listed untracked path directly unless it is marked skipped or credential-looking.",
+                "",
+                "\n\n".join(untracked_sections),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return out_file
 
 
 def run_codex_review(mode: str, out_dir: Path, dry_run: bool, timeout: int | None) -> int:
@@ -768,7 +973,13 @@ def run_claude_review(mode: str, out_dir: Path, dry_run: bool, timeout: int | No
     out_file = out_dir / "claude.md"
     prompt = review_prompt(mode)
     if mode == "diff":
-        prompt += "\nFor diff mode, inspect `git status --short` and `git diff -- .` before reviewing.\n"
+        diff_context = write_diff_context(out_dir)
+        prompt += (
+            "\nFor diff mode, read this precomputed diff context before reviewing: "
+            f"{diff_context}\n"
+            "If the diff context lists untracked files that are not marked skipped or credential-looking, "
+            "read those paths directly before signing off.\n"
+        )
     cmd = [
         "claude",
         "-p",
@@ -842,36 +1053,33 @@ def prepare_workspace(case: dict[str, Any], run_dir: Path) -> Path:
 
 
 def prepare_codex_home(run_dir: Path) -> None:
-    codex_home = run_dir / "codex-home"
+    codex_home = runtime_codex_home(run_dir)
     codex_home.mkdir(parents=True, exist_ok=True)
     for dirname in (".tmp", "tmp", "sessions", "logs", "cache", "shell_snapshots", "skills"):
         (codex_home / dirname).mkdir(parents=True, exist_ok=True)
     (codex_home / "auth.json").touch(exist_ok=True)
-    (run_dir / "home").mkdir(parents=True, exist_ok=True)
-    (run_dir / "cache").mkdir(parents=True, exist_ok=True)
+    runtime_home(run_dir).mkdir(parents=True, exist_ok=True)
+    runtime_cache(run_dir).mkdir(parents=True, exist_ok=True)
 
 
 def prepare_claude_home(run_dir: Path) -> None:
-    home = run_dir / "home"
+    home = runtime_home(run_dir)
     claude_home = home / ".claude"
     claude_home.mkdir(parents=True, exist_ok=True)
     for dirname in ("session-env", "sessions", "shell-snapshots", "projects", "tasks", "cache"):
         (claude_home / dirname).mkdir(parents=True, exist_ok=True)
     (claude_home / ".credentials.json").touch(exist_ok=True)
-    (run_dir / "cache").mkdir(parents=True, exist_ok=True)
+    runtime_cache(run_dir).mkdir(parents=True, exist_ok=True)
 
 
-def scrub_runtime_state(run_dir: Path) -> None:
-    for path in (
-        run_dir / "codex-home" / "auth.json",
-        run_dir / "home" / ".claude" / ".credentials.json",
-    ):
-        if path.exists():
-            path.unlink()
-    for dirname in ("home", "cache", "codex-home", "agent-output"):
-        path = run_dir / dirname
-        if path.exists():
+def scrub_runtime_state(run_dir: Path) -> str | None:
+    path = runtime_dir(run_dir)
+    if path.exists():
+        try:
             shutil.rmtree(path)
+        except OSError as exc:
+            return f"{path}: {exc}"
+    return None
 
 
 def build_case_prompt(case: dict[str, Any], workspace_root: str) -> str:
@@ -910,13 +1118,15 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
         "--dir",
         BWRAP_RUNS,
         "--dir",
-        f"{BWRAP_RUNS}/home",
+        BWRAP_RUNTIME,
         "--dir",
-        f"{BWRAP_RUNS}/cache",
+        f"{BWRAP_RUNTIME}/home",
         "--dir",
-        f"{BWRAP_RUNS}/agent-output",
+        f"{BWRAP_RUNTIME}/cache",
         "--dir",
-        f"{BWRAP_RUNS}/codex-home",
+        f"{BWRAP_RUNTIME}/agent-output",
+        "--dir",
+        f"{BWRAP_RUNTIME}/codex-home",
         "--ro-bind",
         "/usr",
         "/usr",
@@ -962,34 +1172,34 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
         str(workspace),
         BWRAP_WORKSPACE,
         "--bind",
-        str(run_dir / "home"),
-        f"{BWRAP_RUNS}/home",
+        str(runtime_home(run_dir)),
+        f"{BWRAP_RUNTIME}/home",
         "--bind",
-        str(run_dir / "cache"),
-        f"{BWRAP_RUNS}/cache",
+        str(runtime_cache(run_dir)),
+        f"{BWRAP_RUNTIME}/cache",
         "--bind",
-        str(run_dir / "agent-output"),
-        f"{BWRAP_RUNS}/agent-output",
+        str(runtime_agent_output(run_dir)),
+        f"{BWRAP_RUNTIME}/agent-output",
         "--bind-try",
-        str(run_dir / "codex-home"),
-        f"{BWRAP_RUNS}/codex-home",
+        str(runtime_codex_home(run_dir)),
+        f"{BWRAP_RUNTIME}/codex-home",
     ]
     if agent == "codex":
         cmd += [
             "--ro-bind-try",
             f"{host_home}/.codex/auth.json",
-            f"{BWRAP_RUNS}/codex-home/auth.json",
+            f"{BWRAP_RUNTIME}/codex-home/auth.json",
         ]
     elif agent == "claude":
         cmd += [
             "--ro-bind-try",
             f"{host_home}/.claude/.credentials.json",
-            f"{BWRAP_RUNS}/home/.claude/.credentials.json",
+            f"{BWRAP_RUNTIME}/home/.claude/.credentials.json",
         ]
     cmd += [
         "--setenv",
         "HOME",
-        f"{BWRAP_RUNS}/home",
+        f"{BWRAP_RUNTIME}/home",
         "--setenv",
         "PATH",
         env_path,
@@ -998,7 +1208,7 @@ def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> li
         "/tmp",
         "--setenv",
         "XDG_CACHE_HOME",
-        "/tmp/cache",
+        f"{BWRAP_RUNTIME}/cache",
         "--setenv",
         "LANG",
         "C.UTF-8",
@@ -1064,8 +1274,8 @@ def agent_command(agent: str, workspace_root: str, runs_root: str) -> list[str]:
 
 def isolated_command(agent: str, workspace: Path, run_dir: Path, isolation: str) -> list[str]:
     workspace_root = BWRAP_WORKSPACE if isolation == "bwrap" else str(workspace)
-    runs_root = BWRAP_RUNS if isolation == "bwrap" else str(run_dir)
-    cmd = agent_command(agent, workspace_root, runs_root)
+    runtime_root = BWRAP_RUNTIME if isolation == "bwrap" else str(runtime_dir(run_dir))
+    cmd = agent_command(agent, workspace_root, runtime_root)
     if isolation == "none":
         return cmd
     return bwrap_prefix(workspace, run_dir, agent) + cmd
@@ -1085,7 +1295,7 @@ def run_agent_case(
 ) -> int:
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
-    agent_output = run_dir / "agent-output"
+    agent_output = runtime_agent_output(run_dir)
     agent_output.mkdir(parents=True, exist_ok=True)
     if agent == "codex":
         prepare_codex_home(run_dir)
@@ -1139,7 +1349,9 @@ def run_agent_case(
             return 0
         return code
     finally:
-        scrub_runtime_state(run_dir)
+        scrub_error = scrub_runtime_state(run_dir)
+        if scrub_error:
+            append_progress(run_dir, {"event": "runtime_scrub_failed", "detail": scrub_error})
 
 
 def git_changed_paths(workspace: Path) -> list[str]:
@@ -1190,57 +1402,117 @@ def evaluate_allowed_paths(
     }
 
 
-def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
+def credential_findings(root: Path, *, skip_runtime: bool) -> list[str]:
     findings: list[str] = []
     placeholder_paths = {
         Path("codex-home/auth.json"),
         Path("home/.claude/.credentials.json"),
     }
-    for path in sorted(run_dir.rglob("*")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        rel = path.relative_to(run_dir)
-        if rel in placeholder_paths:
-            findings.append(f"{rel}: auth placeholder still preserved")
-            continue
+
+    def on_walk_error(exc: OSError) -> None:
+        filename = Path(exc.filename) if exc.filename else root
         try:
-            size = path.stat().st_size
-        except OSError as exc:
-            findings.append(f"{rel}: unreadable during credential audit: {exc}")
-            continue
-        if size > MAX_SECRET_SCAN_BYTES:
-            findings.append(f"{rel}: exceeds credential scan limit ({size} bytes)")
-            continue
-        try:
-            with path.open("rb") as handle:
-                data = handle.read()
-        except OSError as exc:
-            findings.append(f"{rel}: unreadable during credential audit: {exc}")
-            continue
-        for name, pattern in SECRET_PATTERNS:
-            if (
-                name == "credential_field"
-                and path.suffix.lower() not in STRUCTURED_CREDENTIAL_EXTS
-                and path.suffix.lower() not in TRANSCRIPT_CREDENTIAL_EXTS
-                and path.name not in {".env"}
-                and path.suffix
-            ):
+            rel = filename.relative_to(root)
+        except ValueError:
+            rel = filename
+        findings.append(f"{rel}: unreadable during credential audit: {exc}")
+
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=on_walk_error, followlinks=False):
+        current = Path(dirpath)
+        rel_dir = current.relative_to(root)
+        dirnames[:] = sorted(dirnames)
+        if skip_runtime:
+            if rel_dir.parts and rel_dir.parts[0] == RUNTIME_DIR_NAME:
+                dirnames[:] = []
                 continue
-            if pattern.search(data):
-                findings.append(f"{rel}: matched {name}")
-                break
+            if not rel_dir.parts:
+                dirnames[:] = [dirname for dirname in dirnames if dirname != RUNTIME_DIR_NAME]
+        for filename in sorted(filenames):
+            path = current / filename
+            if path.is_symlink() or not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            # The top-level runtime/ tree is covered by runtime_scratch_cleanup,
+            # which fails closed and scans/hashes leftovers if scrub does not remove it.
+            if skip_runtime and rel.parts and rel.parts[0] == RUNTIME_DIR_NAME:
+                continue
+            if rel in placeholder_paths:
+                findings.append(f"{rel}: auth placeholder still preserved")
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError as exc:
+                findings.append(f"{rel}: unreadable during credential audit: {exc}")
+                continue
+            if size > MAX_SECRET_SCAN_BYTES:
+                findings.append(f"{rel}: exceeds credential scan limit ({size} bytes)")
+                continue
+            try:
+                with path.open("rb") as handle:
+                    data = handle.read()
+            except OSError as exc:
+                findings.append(f"{rel}: unreadable during credential audit: {exc}")
+                continue
+            for name, pattern in SECRET_PATTERNS:
+                if (
+                    name == "credential_field"
+                    and path.suffix.lower() not in STRUCTURED_CREDENTIAL_EXTS
+                    and path.suffix.lower() not in TRANSCRIPT_CREDENTIAL_EXTS
+                    and path.name not in {".env"}
+                    and path.suffix
+                ):
+                    continue
+                if pattern.search(data):
+                    findings.append(f"{rel}: matched {name}")
+                    break
+    return findings
+
+
+def evaluate_credential_artifacts(run_dir: Path) -> dict[str, Any]:
+    findings = credential_findings(run_dir, skip_runtime=True)
 
     if findings:
         detail = "potential credential material preserved: " + ", ".join(findings[:10])
         if len(findings) > 10:
             detail += f" (+{len(findings) - 10} more)"
     else:
-        detail = "no known credential patterns found in preserved artifacts"
+        detail = "no known credential patterns found in preserved artifacts outside runtime/"
     return {
         "type": "credential_artifact_audit",
         "path": str(run_dir),
         "passed": not findings,
         "detail": detail,
+        "findings": findings,
+    }
+
+
+def evaluate_runtime_cleanup(run_dir: Path) -> dict[str, Any]:
+    path = runtime_dir(run_dir)
+    if path.exists():
+        findings = credential_findings(path, skip_runtime=False)
+        digest, hash_error = safe_sha256_path(path)
+        if hash_error:
+            findings.append(f".: runtime hash unavailable: {hash_error}")
+        detail = (
+            "runtime scratch still exists after scrub; leftover scratch scanned"
+            + (" and hashed" if not hash_error else "; hash unavailable")
+        )
+        if findings:
+            detail += ": " + ", ".join(findings[:10])
+            if len(findings) > 10:
+                detail += f" (+{len(findings) - 10} more)"
+        passed = False
+    else:
+        detail = "runtime scratch scrubbed"
+        findings = []
+        digest = None
+        passed = True
+    return {
+        "type": "runtime_scratch_cleanup",
+        "path": str(path),
+        "passed": passed,
+        "detail": detail,
+        "runtime_tree_sha256": digest,
         "findings": findings,
     }
 
@@ -1301,7 +1573,9 @@ def output_hashes(run_dir: Path, workspace: Path, baseline: dict[str, str] | Non
         for path in sorted(child for child in artifacts.rglob("*") if child.is_file()):
             artifact_files[path.relative_to(run_dir).as_posix()] = sha256_path(path)
     return {
-        "run_tree_sha256_before_result": sha256_path(run_dir),
+        # runtime/ is intentionally excluded here; runtime_scratch_cleanup emits
+        # runtime_tree_sha256 when leftover scratch remains after scrub.
+        "run_tree_sha256_before_result": sha256_path(run_dir, exclude_top_level={RUNTIME_DIR_NAME}),
         "artifacts_tree_sha256": sha256_path(artifacts) if artifacts.exists() else "missing",
         "workspace_tree_sha256": sha256_path(workspace),
         "changed_paths_sha256": changed_path_hashes(workspace, baseline),
@@ -1531,11 +1805,15 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 if not args.dry_run:
                     checks.extend(evaluate_checks(workspace, case["checks"]))
                     checks.append(evaluate_allowed_paths(workspace, case["allowed_paths"], baseline_snapshot))
+                    checks.append(evaluate_runtime_cleanup(run_dir))
                     checks.append(evaluate_credential_artifacts(run_dir))
             except KeyboardInterrupt:
                 code = 130
                 runner_error = "runner interrupted; runtime scratch scrubbed and partial result written"
-                scrub_runtime_state(run_dir)
+                scrub_error = scrub_runtime_state(run_dir)
+                if scrub_error:
+                    runner_error = f"{runner_error}; runtime scrub failed: {scrub_error}"
+                    append_progress(run_dir, {"event": "runtime_scrub_failed", "detail": scrub_error})
                 checks = [
                     {
                         "type": "agent_execution",
@@ -1545,6 +1823,7 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                         "exit_code": code,
                     },
                     evaluate_allowed_paths(workspace, case["allowed_paths"], baseline_snapshot),
+                    evaluate_runtime_cleanup(run_dir),
                     evaluate_credential_artifacts(run_dir),
                 ]
             result = {
@@ -1569,9 +1848,10 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 "output_hashes": {} if args.dry_run else output_hashes(run_dir, workspace, baseline_snapshot),
                 "credential_policy": (
                     "agent auth file mounted read-only when required; sandbox env is cleared before "
-                    "agent launch; runtime home/cache/output scratch directories are scrubbed after "
-                    "the agent exits; preserved run artifacts are scanned for known credential patterns; "
-                    "runtime scratch containment is deletion, not post-scrub audit coverage"
+                    "agent launch; runtime home/cache/output scratch lives under run_dir/runtime/ and "
+                    "is checked for post-run removal; preserved run artifacts and run-tree hashes outside "
+                    "runtime/ are scanned for known credential patterns; if runtime/ remains after scrub, "
+                    "the runtime cleanup check scans and hashes that leftover scratch"
                 ),
                 "exit_code": code,
                 "dry_run": args.dry_run,
