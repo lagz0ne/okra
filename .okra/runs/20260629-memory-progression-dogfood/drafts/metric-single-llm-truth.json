@@ -1,0 +1,11 @@
+{
+  "type": "anti_goal_metric_read",
+  "metric_kind": "anti_goal",
+  "metric_id": "single_llm_truth_acceptance_count",
+  "value": 0,
+  "target": 0,
+  "unit": "accepted_claims",
+  "observed_at": "2026-06-29T07:25:20Z",
+  "source": "deterministic checks plus preserved review-blocker status; prior independent subagent review was treated as input, not sole authority",
+  "freshness": "observed_at=2026-06-29T07:25:20Z -> status=fresh against max_age=current turn"
+}

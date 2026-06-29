@@ -1,6 +1,6 @@
 {
   "name": "okra",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Reverse Tornado OKR workflow skill for running measurable goals with anti-goal guardrails.",
   "author": {
     "name": "lagz0ne",

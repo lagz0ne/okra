@@ -1,0 +1,68 @@
+{
+  "type": "acceptance_evidence_checkin",
+  "round": 1,
+  "single_llm_truth_acceptance_count": 0,
+  "evidence": [
+    {
+      "kind": "deterministic_command",
+      "command": "git diff --check",
+      "result": "exit 0"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/validate-skills.sh",
+      "result": "exit 0"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "python3 scripts/okr-runner.py validate",
+      "result": "exit 0"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both --case okra-default-dogfood",
+      "result": "exit 0; prompt omitted injected skill context; Codex omitted --ignore-rules; Claude omitted --safe-mode"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both",
+      "result": "exit 0"
+    },
+    {
+      "kind": "review_wrapper",
+      "command": "scripts/review-skill.sh --agent both --mode diff",
+      "result": "exit 1 due local tool/API failures, not review findings",
+      "artifacts": [
+        ".runs/review/20260629T071659Z-diff/codex.log",
+        ".runs/review/20260629T071659Z-diff/claude.md"
+      ]
+    }
+  ],
+  "review_set": [
+    {
+      "reviewer": "triage-three/Linnaeus",
+      "source": "independent subagent second opinion during this run",
+      "verdict": "default dogfooding needed a repo/eval gate rather than only documentation",
+      "independence_basis": "separate reviewer context",
+      "conflict_status": "incorporated"
+    },
+    {
+      "reviewer": "triage-three/Ohm",
+      "source": "independent subagent second opinion during this run",
+      "verdict": "memory progression needed terminalization, consolidation, continuation, freshness, and redaction records",
+      "independence_basis": "separate reviewer context",
+      "conflict_status": "incorporated"
+    },
+    {
+      "reviewer": "triage-three/Locke",
+      "source": "independent subagent second opinion during this run",
+      "verdict": "second-opinion evidence should be first-class and one review narrative is insufficient for judgement-heavy promotion",
+      "independence_basis": "separate reviewer context",
+      "conflict_status": "incorporated"
+    }
+  ],
+  "blocked_review_evidence": {
+    "codex_log_sha256": "8e3330eeb312ddb37b9da73c3ece4a8aa7e2ade4b7bb255573aa487bc89f0f58",
+    "claude_md_sha256": "51e01666bcabad532aecb585dfa882d4d38467c26fc3778f2654e8140429d09b"
+  }
+}

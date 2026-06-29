@@ -1,0 +1,11 @@
+{
+  "type": "objective_metric_read",
+  "metric_kind": "objective",
+  "metric_id": "terminal_memory_checker_calibrated",
+  "value": 1,
+  "target": 1,
+  "unit": "calibrated_checker",
+  "observed_at": "2026-06-29T08:14:52Z",
+  "source": "okra_terminal_memory calibration and scripts/validate-skills.sh",
+  "freshness": "observed_at=2026-06-29T08:14:52Z -> status=fresh against max_age=current turn"
+}

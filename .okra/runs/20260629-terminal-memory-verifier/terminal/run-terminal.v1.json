@@ -1,0 +1,94 @@
+{
+  "acceptance_evidence_refs": [
+    ".okra/runs/20260629-terminal-memory-verifier/checkins.jsonl",
+    ".okra/runs/20260629-terminal-memory-verifier/ledger.jsonl"
+  ],
+  "accepted_dkr_checkpoints": [
+    ".okra/runs/20260629-terminal-memory-verifier/workers/dkr-verifier-contract/progress.jsonl"
+  ],
+  "anti_goal_metric_refs": [
+    {
+      "log": ".okra/runs/20260629-terminal-memory-verifier/ledger.jsonl",
+      "metric_id": "single_llm_truth_acceptance_count",
+      "record_hash": "710cde2a3fb13d8e768f851962ca6e1a90b512baab77426ec5ca71c6757ec793",
+      "target": 0,
+      "value": 0
+    },
+    {
+      "log": ".okra/runs/20260629-terminal-memory-verifier/ledger.jsonl",
+      "metric_id": "trace_loss_reuse_count",
+      "target": 0,
+      "value": 0
+    },
+    {
+      "log": ".okra/runs/20260629-terminal-memory-verifier/ledger.jsonl",
+      "metric_id": "unratified_memory_promotion_count",
+      "target": 0,
+      "value": 0
+    }
+  ],
+  "consolidation_output": ".okra/runs/20260629-terminal-memory-verifier/memory/completed-run-consolidation.v1.json",
+  "continuation_packet": ".okra/runs/20260629-terminal-memory-verifier/memory/continuation-packet.v1.json",
+  "objective_metric_refs": [
+    {
+      "log": ".okra/runs/20260629-terminal-memory-verifier/ledger.jsonl",
+      "metric_id": "terminal_memory_checker_calibrated",
+      "record_hash": "1dbca04dcfd80ed6f2786acc5089424d93d81821ac9dbb2f6f804014b8477aa1",
+      "target": 1,
+      "value": 1
+    }
+  ],
+  "promoted_ckr_pkr_refs": {
+    "candidate_only": [
+      "terminal memory learning"
+    ],
+    "promoted": []
+  },
+  "retained_trace_manifest": ".okra/runs/20260629-terminal-memory-verifier/memory/trace-manifest.v1.jsonl",
+  "review_set": [
+    {
+      "applies_to_run_id": "20260629-terminal-memory-verifier",
+      "artifact_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/codex.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "codex_review",
+      "source_content_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    },
+    {
+      "applies_to_run_id": "20260629-terminal-memory-verifier",
+      "artifact_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/claude.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "claude_review",
+      "source_content_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    }
+  ],
+  "run_id": "20260629-terminal-memory-verifier",
+  "single_llm_truth_acceptance_count": 0,
+  "terminal_state": "blocked_candidate_only",
+  "terminalized_at": "2026-06-29T10:28:57Z",
+  "unresolved_flags": [
+    {
+      "flag": "cannot",
+      "reason": "semantic memory promotion remains blocked on clean independent/human review and scored eval pass"
+    }
+  ]
+}

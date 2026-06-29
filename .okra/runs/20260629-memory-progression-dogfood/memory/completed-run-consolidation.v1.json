@@ -1,0 +1,114 @@
+{
+  "candidate_anti_goals": [
+    {
+      "metric": "single_llm_truth_acceptance_count",
+      "target": 0,
+      "type": "tripwire"
+    },
+    {
+      "metric": "trace_loss_reuse_count",
+      "target": 0,
+      "type": "tripwire"
+    },
+    {
+      "metric": "unratified_memory_promotion_count",
+      "target": 0,
+      "type": "tripwire"
+    }
+  ],
+  "consolidated_at": "2026-06-29T10:28:57Z",
+  "deferred_or_rejected": [
+    {
+      "item": "semantic memory promotion",
+      "reason": "latest review artifacts contain blocking/candidate-only evidence",
+      "status": "blocked"
+    },
+    {
+      "item": "scored default-dogfood pass",
+      "reason": "latest scored Codex failed and Claude run was incomplete",
+      "status": "blocked"
+    }
+  ],
+  "extracted_avoidances": [
+    {
+      "description": "Keep semantic memory promotion candidate-only when independent review is missing or blocking.",
+      "id": "blocked-review-gap",
+      "type": "avoidance"
+    }
+  ],
+  "extracted_misconceptions": [
+    {
+      "description": "Prior-run memory is automatic input, not authority.",
+      "id": "prior-memory-authority",
+      "type": "misconception"
+    }
+  ],
+  "extracted_optimizations": [
+    {
+      "description": "Use a deterministic checker for terminal proof, trace retention, review-set shape, and blocked/candidate status.",
+      "id": "terminal-run-store-checker",
+      "type": "optimization"
+    }
+  ],
+  "extracted_traps": [
+    {
+      "description": "A single model narrative can claim completed memory is reusable without deterministic proof.",
+      "id": "single-llm-truth",
+      "type": "trap"
+    }
+  ],
+  "no_regression_evidence": [
+    "scripts/validate-skills.sh passes with terminal run-store calibration"
+  ],
+  "redaction_decisions": [
+    {
+      "decision": "retain",
+      "scope": "public repo artifacts"
+    }
+  ],
+  "review_set": [
+    {
+      "applies_to_run_id": "20260629-memory-progression-dogfood",
+      "artifact_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/codex.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "codex_review",
+      "source_content_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    },
+    {
+      "applies_to_run_id": "20260629-memory-progression-dogfood",
+      "artifact_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/claude.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "claude_review",
+      "source_content_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    }
+  ],
+  "run_id": "20260629-memory-progression-dogfood",
+  "source_run_hash": "db4ef93f99e6b3b2cc45c24bbd5272549936e2ecdc8a1c1ce931a0b1e646fa16",
+  "terminal_record_hash": "efaa4f981071d06903dcaa1cbf666fadb086d40914bd92c501c458a215fd9fd5",
+  "trace_manifest_refs": [
+    {
+      "path": ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl",
+      "sha256": "e1c6db8cae6d439b1cc7e90bc5fdebb839503a6712ffba179e65b7c7d78d1838"
+    }
+  ]
+}

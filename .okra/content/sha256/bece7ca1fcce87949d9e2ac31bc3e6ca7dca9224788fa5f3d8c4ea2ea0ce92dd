@@ -1,0 +1,11 @@
+{"path":"AGENTS.md","sha256":"2aed7f05a767831b102e9cb70a1f3492888f77bab699390da7fc73c4d130ee05","reason":"default dogfooding workflow and anti-goal policy"}
+{"path":"README.md","sha256":"a2f31f7d4306af56b436000c0151b4487f6f131b077cd035fb54c5a2c7060184","reason":"public dogfooding note and eval command"}
+{"path":"evals/review/skill-review.md","sha256":"4976834de0a5f120d1967a1ee434101efaae2d8f47646faea96880887c4294d7","reason":"review criteria for dogfooding, no-single-LLM truth, and terminalization"}
+{"path":"scripts/okr-runner.py","sha256":"f287d360f3edcd634ccad55c231136648d5775b3dc084244752d11c205fb1ca4","reason":"runner support for omitted skill context and project-rule honoring"}
+{"path":"skills/reverse-tornado-okr/SKILL.md","sha256":"2bcf1da32afe9e5ad274c8e4bddd372a91839b4b52b9f0c090abdec91574f7a0","reason":"terminalization and judgement-heavy memory acceptance rules"}
+{"path":"skills/reverse-tornado-okr/references/learning-memory.md","sha256":"d50864a95b96c0bc3b02ad0871ed8429b3434e78ba9ece2a06d13c2c7ba7765e","reason":"full memory cycle and record schemas"}
+{"path":"evals/blindbox/cases/okra-default-dogfood.json","sha256":"c64598d2a1b6c256826f3c33763a9f3e4da29be661ca7bcb386eae943a70a081","reason":"default dogfood blindbox case"}
+{"path":"evals/blindbox/fixtures/okra-default-dogfood/AGENTS.md","sha256":"c715a4594aa7f0632c1573570c8f680bd6ad82282a0bc7bab2b3883cccd74d55","reason":"fixture project instructions that trigger dogfooding"}
+{"path":"evals/blindbox/fixtures/okra-default-dogfood/README.md","sha256":"de1399d5f25d240ebae0c3897d9e2f910735966602f2db10f3414f3c0589b92a","reason":"fixture prior-run candidate inputs"}
+{"path":".runs/review/20260629T071659Z-diff/codex.log","sha256":"8e3330eeb312ddb37b9da73c3ece4a8aa7e2ade4b7bb255573aa487bc89f0f58","reason":"blocked Codex review evidence"}
+{"path":".runs/review/20260629T071659Z-diff/claude.md","sha256":"51e01666bcabad532aecb585dfa882d4d38467c26fc3778f2654e8140429d09b","reason":"blocked Claude review evidence"}

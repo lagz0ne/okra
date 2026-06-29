@@ -1,0 +1,58 @@
+{
+  "frame_version": "frame.v1",
+  "frame_hash": "0e8295a49f84e0c41d71907e5065f800a6e07487eebaa38be43852034490f8a1",
+  "objective": {
+    "metric_id": "terminal_memory_checker_calibrated",
+    "target": 1,
+    "unit": "calibrated_checker",
+    "definition": "The compact terminalized continuation memory skill has a deterministic checker, calibrated goldens, runner wiring, and dogfood case coverage."
+  },
+  "anti_goals": [
+    {
+      "metric_id": "single_llm_truth_acceptance_count",
+      "target": 0,
+      "type": "tripwire",
+      "definition": "Do not accept the verifier as valuable from one model narrative alone."
+    },
+    {
+      "metric_id": "terminal_memory_false_confidence_count",
+      "target": 0,
+      "type": "tripwire",
+      "definition": "Do not let vocabulary-only artifacts pass without terminal proof, retained trace, evidence gate, and value verification."
+    }
+  ],
+  "metric_contracts": {
+    "terminal_memory_checker_calibrated": {
+      "source": "checker calibration plus scripts/validate-skills.sh",
+      "max_age": "current turn",
+      "freshness_rule": "fresh only when calibration and validation were run after the latest checker/case edits"
+    },
+    "single_llm_truth_acceptance_count": {
+      "source": "deterministic commands plus independent reviewer result when available",
+      "max_age": "current turn",
+      "freshness_rule": "must be read before final claim"
+    }
+  },
+  "action_envelope": {
+    "allowed_moves": [
+      "add deterministic checker",
+      "add golden pass/fail fixtures",
+      "wire runner validation and result hashing",
+      "extend default-dogfood eval fixture",
+      "run local deterministic validation"
+    ],
+    "forbidden_moves": [
+      "claim scored evals ran when only dry-run dispatch ran",
+      "claim API-backed review passed if it did not run",
+      "weaken existing learning-memory gates to make the new checker pass"
+    ],
+    "approval_gates": [
+      "human owns whether the compact memory skill becomes policy memory"
+    ]
+  },
+  "human_approval": {
+    "ratification_status": "ratified_by_resume_after_value_verification_discussion",
+    "source": "user asked to resume after asking how the compact skill value could be verified",
+    "ratified_at": "2026-06-29T08:14:52Z"
+  }
+}

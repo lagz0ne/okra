@@ -1,0 +1,46 @@
+{
+  "run_id": "20260629-memory-progression-dogfood",
+  "terminalized_at": "2026-06-29T07:25:20Z",
+  "terminal_state": "local_implementation_complete_with_deterministic_validation_and_external_review_blocker",
+  "objective_metric_refs": [
+    {
+      "metric_id": "memory_progression_default_dogfood_ready",
+      "value": 1,
+      "target": 1,
+      "log": ".okra/runs/20260629-memory-progression-dogfood/ledger.jsonl"
+    }
+  ],
+  "anti_goal_metric_refs": [
+    {
+      "metric_id": "single_llm_truth_acceptance_count",
+      "value": 0,
+      "target": 0,
+      "log": ".okra/runs/20260629-memory-progression-dogfood/ledger.jsonl"
+    },
+    {
+      "metric_id": "default_dogfood_eval_dispatch_regression_count",
+      "value": 0,
+      "target": 0,
+      "log": ".okra/runs/20260629-memory-progression-dogfood/ledger.jsonl"
+    },
+    {
+      "metric_id": "review_gate_unreported_failure_count",
+      "value": 0,
+      "target": 0,
+      "log": ".okra/runs/20260629-memory-progression-dogfood/ledger.jsonl"
+    }
+  ],
+  "unresolved_flags": [
+    {
+      "flag": "cannot",
+      "reason": "scripts/review-skill.sh --agent both --mode diff could not complete because Codex hit a read-only filesystem app-server initialization error and Claude reported API connection refused."
+    }
+  ],
+  "accepted_dkr_checkpoints": [
+    ".okra/runs/20260629-memory-progression-dogfood/workers/dkr-memory-cycle/progress.jsonl"
+  ],
+  "retained_trace_manifest": ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl",
+  "consolidation_output": ".okra/runs/20260629-memory-progression-dogfood/memory/completed-run-consolidation.v1.json",
+  "continuation_packet": ".okra/runs/20260629-memory-progression-dogfood/memory/continuation-packet.v1.json",
+  "second_opinion_evidence": ".okra/runs/20260629-memory-progression-dogfood/checkins.jsonl"
+}

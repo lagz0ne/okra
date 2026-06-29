@@ -1,0 +1,26 @@
+{
+  "type": "flag_lifecycle_snapshot",
+  "flags": [
+    {
+      "flag": "cannot",
+      "status": "open",
+      "reason": "API-backed Codex/Claude diff review could not complete in this environment.",
+      "resolution_path": "Rerun scripts/review-skill.sh --agent both --mode diff when Codex app-server and Claude API connectivity are available."
+    },
+    {
+      "flag": "breaking",
+      "status": "closed",
+      "reason": "deterministic validation, case validation, and dry-run dispatch passed"
+    },
+    {
+      "flag": "pointless",
+      "status": "closed",
+      "reason": "the implementation changed the default dogfood, memory-cycle, and eval-dispatch surfaces directly"
+    },
+    {
+      "flag": "authority_drift",
+      "status": "closed",
+      "reason": "no objective, anti-goal, or action-envelope change was accepted without user direction"
+    }
+  ]
+}

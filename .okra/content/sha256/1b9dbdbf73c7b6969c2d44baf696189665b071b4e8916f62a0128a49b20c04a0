@@ -1,0 +1,51 @@
+I have enough to assess the environment. I read the diff context, both new checkers, the new case + fixtures, the golden corpus, the runner wiring, and the committed `.okra/` run artifacts (the only untracked, non-credential paths). Findings below are ordered by severity, with the harness-wiring verdict and positives at the end.
+
+---
+
+## Findings
+
+### 1. (High) The repo's own committed dogfood run stores fail the project's own terminalization gate
+
+`.okra/` is now a tracked, durable memory store (see Finding 2), and the two committed runs are referenced as `load_first` continuation authority for future runs (`.okra/runs/20260629-memory-progression-dogfood/memory/continuation-packet.v1.json:13-17`). Yet both would **fail** `okra_terminal_run_store.py` if it were ever run against them — the exact false-confidence the review asks to catch.
+
+- **Terminal predates its own evidence.** The checker errors when `terminalized_at < latest recorded_at` (`evals/blindbox/checks/okra_terminal_run_store.py:313-314`).
+  - `…memory-progression-dogfood/terminal/run-terminal.v1.json:3` → `terminalized_at: 07:25:20Z`, but `…/ledger.jsonl:1` records `recorded_at: 07:27:52Z` (and a checkin at `07:28:34Z`). Terminal predates evidence by ~3 min.
+  - `…terminal-memory-verifier/terminal/run-terminal.v1.json:3` → `08:14:52Z` vs `…/ledger.jsonl:1` `08:17:02Z`. Same defect.
+- **`review_set` entries are missing the required structured fields.** The checker requires the 11 fields in `REVIEW_FIELDS` (`okra_terminal_run_store.py:23-35`, enforced at `:194-208`, `:484-487`). The committed second-opinion records use only `reviewer`/`source`/`verdict`/`conflict_status` (`…memory-progression-dogfood/checkins.jsonl:2`) or `reviewer`/`scope`/`status` (`…terminal-memory-verifier/checkins.jsonl:2`) — missing `reviewer_kind`, `tool_model`, `prompt_hash`, `source_content_hash`, `objections_or_dissent`, `confidence`, `artifact_path`, `artifact_hash`.
+
+So the flagship demonstration of "terminalize a completed run with `single_llm_truth_acceptance_count == 0` and structured second opinions" is itself self-attested narrative that the deterministic checker would reject. Nothing in `validate`/CI runs the checker against these host stores, so the gap is silent. A future agent told to trust the continuation packet inherits a terminal proof that does not pass the gate it claims to satisfy.
+
+> Note: `…terminal-memory-verifier/checkins.jsonl:2` also records `okra_terminal_memory --calibrate … "1 pass, 5 fail"`, but the current golden corpus has **10** fail goldens and the checker now expects 10 (`okra_terminal_memory.py:315-326`). The committed memory is point-in-time and already stale vs. the harness it documents.
+
+### 2. (Medium) `.okra/` is committed as durable memory; only lock files are ignored
+
+`.gitignore:2` adds `.okra/**/*.lock` only — every other `.okra/**` path is now tracked. This is what turns the run stores above into durable, committed continuation authority, and it also commits noise:
+
+- `.okra/ledger.jsonl`, `.okra/flags.jsonl`, `.okra/checkins.jsonl` are 0-byte placeholders (per diff-context sizes) being committed at repo root.
+- Mutable run scratch (drafts, per-run logs, content blobs) becomes version-controlled state that drifts from the live harness (Finding 1).
+
+Decide explicitly: if `.okra/` is meant to be durable dogfood memory, then its stores must pass `okra_terminal_run_store.py` before commit (and the empty root logs pruned); if it is run scratch like `.runs/`, it should be ignored. Right now it is neither — tracked but unverified.
+
+### 3. (Low/Medium) `honor_project_rules: true` widens the executed-instruction trust surface
+
+`okra-default-dogfood.json:7` opts into `honor_project_rules: true`, which drops `--ignore-rules` for Codex (`scripts/okr-runner.py:1305-1306`) and `--safe-mode` for Claude (`:1324-1325`) while `--dangerously-bypass-approvals-and-sandbox` / `--dangerously-skip-permissions` remain. This is the correct mechanism to test *default* dogfooding, and it is gated behind an opt-in boolean that defaults `False` and is type-checked (`:512-514`). But it means scored dogfood runs now execute the fixture's `AGENTS.md`/`CLAUDE.md` as live instructions. That is acceptable because fixtures are repo-controlled and bwrap-isolated, and `AGENTS.md:86` already warns to use trusted fixtures — but the trust widening should be called out wherever `honor_project_rules` is documented so a future author doesn't set it on an untrusted/imported fixture.
+
+### 4. (Low) Vocabulary-susceptible text checks, partially backstopped
+
+`okra_terminal_memory.py` is a regex keyword-presence checker over prose, and the dogfood case applies `file_contains` + `okra_terminal_memory` + `okra_learning_memory` to a single `tasks/okra-default-dogfood.md` (`okra-default-dogfood.json:13-46`). These can in principle pass on recitation. The case is saved by pairing them with the deterministic `okra_terminal_run_store` store check (`:47-50`), which enforces hash chains and timestamp ordering. Keep that deterministic gate mandatory on any case that uses the text checks; the text checks alone are not evidence of a real store.
+
+### 5. (Low) Two checker corner-gaps that allow well-formed fabrication
+
+- **Trace hash only verified when a path is present.** `check_trace_manifest` validates `content_hash`/`excerpt_hash` *format* always, but only verifies the hash against bytes when the record carries `path`/`source_log_path` (`okra_terminal_run_store.py:388-404`). A trace line with a syntactically valid but fabricated 64-hex `content_hash` and no path passes.
+- **Hidden content-store requirement.** `check_content_store` hard-requires `.okra/content/sha256/` to exist (`:417-419`) even when nothing references a content hash, but the case prompt never states this. An agent that hand-rolls the store without the content dir fails on `missing .okra/content/sha256` for a reason not surfaced in the prompt. It's discoverable via the shipped `okra-store.sh`, so this is minor, but worth either documenting in the prompt or relaxing when no content hashes are referenced.
+
+---
+
+## What works (verified)
+
+- **Canonical-skill, no duplication:** `copy_skill_into_workspace` (`scripts/okr-runner.py:1039-1046`) injects the single `skills/reverse-tornado-okr` into the disposable workspace unconditionally, independent of `inject_skill_context`; `AGENTS.md:7` and `README.md` point edits at the canonical path. The dogfood test correctly relies on project rules (not prompt injection) to discover it (`inject_skill_context: false`).
+- **Validation runs both new checkers:** `validate-skills.sh` → `okr-runner.py validate` calibrates `okra_terminal_memory` (golden pass/fail) and `okra_terminal_run_store` (self-built temp stores; golden README placeholder satisfies the existence check) at `:766-790`. Case schema validation now type-checks the two new booleans (`:512-514`) and the two new check types are allow-listed (`:503-504`).
+- **Isolated evals + raw artifact preservation:** the new case is auto-discovered by `load_cases`, included in the default `--agent both` run, and documented in `AGENTS.md:76` / `README.md`. The deterministic hash-chain verification in `load_log` (`okra_terminal_run_store.py:119-151`) is a genuinely strong anti-false-confidence gate (seq/prev_hash/payload_sha256/record_hash all recomputed); the committed dogfood ledger and `status.md` last-hash actually agree (`…/status.md:7` ↔ `…/ledger.jsonl:4`).
+- **`single_llm_truth` enforcement and honest blocked-state handling:** the deterministic `single_llm_truth_acceptance_count == 0` read is enforced structurally (`okra_terminal_run_store.py:316-320`) and the review-gap/blocked path is modeled and calibrated (`:229-242`, `:684-719`). The real dogfood run honestly recorded a `cannot` flag when independent review tooling failed rather than claiming a clean done (`…/run-terminal.v1.json:33-37`) — the intended behavior.
+
+**Net:** the harness wiring (skill location, validation, eval dispatch, deterministic gates, opt-in project-rule honoring) is sound and a future Claude/Codex agent can operate it. The real problem is in the *committed evidence*: `.okra/` is now durable, tracked memory, but its terminalized run stores would fail the very `okra_terminal_run_store` gate the change introduces (Findings 1–2). I did not modify any files.

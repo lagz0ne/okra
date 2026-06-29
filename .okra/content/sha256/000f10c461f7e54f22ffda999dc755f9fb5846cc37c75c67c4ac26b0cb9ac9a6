@@ -1,0 +1,1120 @@
+#!/usr/bin/env python3
+"""Check that a completed OKRA memory run has terminal proof before reuse."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import re
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+
+REQUIRED_FILES = (
+    "frame/frame.v1.json",
+    "frame/current",
+    "tree/tree.v1.json",
+    "tree/current",
+    "terminal/run-terminal.v1.json",
+    "memory/completed-run-consolidation.v1.json",
+    "memory/continuation-packet.v1.json",
+    "memory/trace-manifest.v1.jsonl",
+)
+REVIEW_FIELDS = {
+    "reviewer_kind",
+    "tool_model",
+    "prompt_hash",
+    "source_content_hash",
+    "verdict",
+    "objections_or_dissent",
+    "confidence",
+    "independence_basis",
+    "conflict_status",
+    "artifact_path",
+    "artifact_hash",
+}
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
+REVIEW_GAP_MARKERS = ("pending", "blocked", "candidate-only", "candidate_only", "not_accepted", "not accepted")
+REVIEW_GAP_KEYS = {
+    "review_status",
+    "review_gap",
+    "review_set_status",
+    "independent_review_status",
+    "memory_promotion_status",
+    "promotion_status",
+    "single_llm_truth_status",
+}
+BLOCKING_REVIEW_PATTERN = re.compile(
+    r"\b(blocking|blocker|failed|fail|reject(?:ed)?|no[- ]?ship|critical|must fix|unresolved findings?)\b",
+    flags=re.IGNORECASE,
+)
+NEGATED_BLOCKING_PATTERN = re.compile(
+    r"\b(no|none|without)\s+(blocking|blockers?|critical|must[- ]fix|unresolved findings?|objections?|dissent)\b",
+    flags=re.IGNORECASE,
+)
+PASS_REVIEW_PATTERN = re.compile(r"\b(pass(?:ed)?|approve(?:d)?|sign[- ]?off|ship)\b", flags=re.IGNORECASE)
+AGENT_WRITABLE_REVIEW_ROOTS = {".okra", "tasks"}
+COMPLETED_REVIEW_ARTIFACT_ROOTS = {".runs", "reviews"}
+
+
+def canonical_hash(value: Any) -> str:
+    data = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
+
+
+def file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def parse_time(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        normalized = value.removesuffix("Z") + ("+00:00" if value.endswith("Z") else "")
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def payload_text(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).lower()
+
+
+def sentence_context(text: str, start: int, end: int) -> str:
+    left = max(text.rfind(boundary, 0, start) for boundary in ("\n", ".", ";", "|"))
+    rights = [text.find(boundary, end) for boundary in ("\n", ".", ";", "|")]
+    right = min(position for position in rights if position != -1) if any(position != -1 for position in rights) else len(text)
+    return text[left + 1 : right]
+
+
+def workspace_for_store(store: Path) -> Path:
+    parts = store.resolve().parts
+    if ".okra" in parts:
+        index = parts.index(".okra")
+        return Path(*parts[:index]) if index else Path("/")
+    return store.parent
+
+
+def content_dir_for_store(store: Path) -> Path:
+    workspace = workspace_for_store(store)
+    return workspace / ".okra" / "content" / "sha256"
+
+
+def load_json(path: Path, label: str, errors: list[str]) -> dict[str, Any]:
+    if not path.exists():
+        errors.append(f"missing {label}: {path}")
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        errors.append(f"{path}: invalid json: {exc}")
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"{path}: {label} must be an object")
+        return {}
+    return value
+
+
+def load_log(path: Path, errors: list[str], *, require_nonempty: bool = False) -> tuple[list[dict[str, Any]], dt.datetime | None]:
+    if not path.exists():
+        errors.append(f"missing log: {path}")
+        return [], None
+
+    records: list[dict[str, Any]] = []
+    latest: dt.datetime | None = None
+    prev = "GENESIS"
+    expected_seq = 1
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        if not line.strip():
+            continue
+        label = f"{path}:{lineno}"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"{label}: invalid json: {exc}")
+            continue
+        if not isinstance(record, dict):
+            errors.append(f"{label}: record must be an object")
+            continue
+        if record.get("seq") != expected_seq:
+            errors.append(f"{label}: expected seq {expected_seq}, got {record.get('seq')}")
+        if record.get("prev_hash") != prev:
+            errors.append(f"{label}: prev_hash mismatch")
+        payload = record.get("payload")
+        if record.get("payload_sha256") != canonical_hash(payload):
+            errors.append(f"{label}: payload_sha256 mismatch")
+        without_hash = {key: value for key, value in record.items() if key != "record_hash"}
+        record_hash = canonical_hash(without_hash)
+        if record.get("record_hash") != record_hash:
+            errors.append(f"{label}: record_hash mismatch")
+        prev = str(record.get("record_hash", ""))
+        expected_seq += 1
+        recorded_at = parse_time(record.get("recorded_at"))
+        if recorded_at is None:
+            errors.append(f"{label}: missing parseable recorded_at")
+        elif latest is None or recorded_at > latest:
+            latest = recorded_at
+        records.append(record)
+
+    if require_nonempty and not records:
+        errors.append(f"empty required log: {path}")
+    return records, latest
+
+
+def walk_dicts(value: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    if isinstance(value, dict):
+        found.append(value)
+        for child in value.values():
+            found.extend(walk_dicts(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(walk_dicts(child))
+    return found
+
+
+def normalized_keys(value: dict[str, Any]) -> set[str]:
+    return {re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_") for key in value}
+
+
+def review_entries(values: list[Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for value in values:
+        for item in walk_dicts(value):
+            keys = normalized_keys(item)
+            if "review_set" in keys:
+                child = item.get("review_set") or item.get("reviewSet")
+                if isinstance(child, list):
+                    entries.extend(entry for entry in child if isinstance(entry, dict))
+                elif isinstance(child, dict):
+                    entries.append(child)
+            elif len(keys & REVIEW_FIELDS) >= 5:
+                entries.append(item)
+    unique: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in entries:
+        identity = payload_text(entry)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(entry)
+    return unique
+
+
+def review_entry_missing_fields(entry: dict[str, Any]) -> list[str]:
+    keys = normalized_keys(entry)
+    aliases = {
+        "tool_model": {"tool_model", "tool_or_model", "tool", "model"},
+        "source_content_hash": {
+            "source_content_hash",
+            "source_content_sha256",
+            "source_hash",
+            "content_hash",
+            "content_sha256",
+            "source_hashes",
+            "content_hashes",
+            "source_content_hashes",
+        },
+        "objections_or_dissent": {"objections_or_dissent", "objections", "dissent"},
+        "artifact_path": {"artifact_path", "path", "review_path"},
+        "artifact_hash": {"artifact_hash", "hash", "path_hash", "review_hash"},
+    }
+    missing = []
+    for field in REVIEW_FIELDS:
+        accepted = aliases.get(field, {field})
+        if not keys & accepted:
+            missing.append(field)
+    return missing
+
+
+def value_for_alias(entry: dict[str, Any], aliases: set[str]) -> Any:
+    for key, value in entry.items():
+        normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+        if normalized in aliases:
+            return value
+    return None
+
+
+def review_strings(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        found: list[str] = []
+        for child in value:
+            found.extend(review_strings(child))
+        return found
+    if isinstance(value, dict):
+        found = []
+        for child in value.values():
+            found.extend(review_strings(child))
+        return found
+    return []
+
+
+def review_has_blocking_text(entry: dict[str, Any]) -> bool:
+    for key in ("verdict", "status", "conflict_status", "objections_or_dissent", "objections", "dissent"):
+        for text in review_strings(entry.get(key)):
+            if not text.strip():
+                continue
+            for match in BLOCKING_REVIEW_PATTERN.finditer(text):
+                context = sentence_context(text, match.start(), match.end())
+                if NEGATED_BLOCKING_PATTERN.search(context):
+                    continue
+                return True
+    return False
+
+
+def review_artifact_matches(entry: dict[str, Any], workspace: Path) -> bool:
+    artifact_path = value_for_alias(entry, {"artifact_path", "path", "review_path"})
+    artifact_hash = value_for_alias(entry, {"artifact_hash", "hash", "review_hash"})
+    if not isinstance(artifact_path, str) or not artifact_path:
+        return False
+    if not isinstance(artifact_hash, str) or not HEX64.fullmatch(artifact_hash):
+        return False
+    path = Path(artifact_path)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    if path.parts and path.parts[0] in AGENT_WRITABLE_REVIEW_ROOTS:
+        return False
+    if not path.parts or path.parts[0] not in COMPLETED_REVIEW_ARTIFACT_ROOTS:
+        return False
+    candidate = (workspace / path).resolve()
+    try:
+        candidate.relative_to(workspace.resolve())
+    except ValueError:
+        return False
+    return candidate.is_file() and file_hash(candidate) == artifact_hash
+
+
+def has_completed_reviews(entries: list[dict[str, Any]], workspace: Path) -> bool:
+    completed = 0
+    for entry in entries:
+        text = payload_text(entry)
+        if any(marker in text for marker in ("pending", "blocked", "candidate_only", "not_accepted")):
+            continue
+        if review_has_blocking_text(entry):
+            continue
+        verdict_text = str(entry.get("verdict") or entry.get("status") or "").lower()
+        conflict_text = str(entry.get("conflict_status") or "").lower()
+        if verdict_text and not PASS_REVIEW_PATTERN.search(verdict_text):
+            continue
+        if conflict_text and conflict_text not in {"none", "no conflict", "no_conflict", "resolved"}:
+            continue
+        if review_artifact_matches(entry, workspace):
+            completed += 1
+    return completed >= 2
+
+
+def review_gap_is_explicit(values: list[Any], entries: list[dict[str, Any]]) -> bool:
+    for entry in entries:
+        text = payload_text(entry)
+        if any(marker in text for marker in REVIEW_GAP_MARKERS):
+            return True
+
+    for item in walk_dicts(values):
+        keys = normalized_keys(item)
+        text = payload_text(item)
+        if keys & REVIEW_GAP_KEYS and any(marker in text for marker in REVIEW_GAP_MARKERS):
+            return True
+        if "unresolved_flags" in keys and "review" in text and any(marker in text for marker in REVIEW_GAP_MARKERS):
+            return True
+    return False
+
+
+def contains_review_gap_acceptance(values: list[Any]) -> bool:
+    status_keys = REVIEW_GAP_KEYS | {"candidate_status", "status"}
+    for item in walk_dicts(values):
+        keys = normalized_keys(item)
+        if not (keys & status_keys):
+            continue
+        for key, value in item.items():
+            normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+            if normalized not in status_keys:
+                continue
+            text = payload_text(value).replace("_", " ").replace("-", " ")
+            if not any(marker.replace("_", " ").replace("-", " ") in text for marker in REVIEW_GAP_MARKERS):
+                continue
+            without_rejection = re.sub(r"\bnot\s+accepted\b", "", text)
+            if re.search(r"\b(accepted|ratified|promoted|reusable)\b", without_rejection):
+                return True
+    return False
+
+
+def contains_forbidden_single_llm_acceptance(values: list[Any]) -> bool:
+    text = payload_text(values)
+    bad_pattern = r"\b(single|one)\s+(llm|model)\b[^\n.]{0,180}\b(enough|sufficient|source of truth|accepted)\b"
+    local_rejection = (
+        r"\bnot\s+(enough|sufficient|accepted)\b|"
+        r"\bnot itself evidence\b|"
+        r"\breject\b[^\n.;|]{0,120}\b(single|one)\s+(llm|model)\b|"
+        r"\bno\s+single[-_ ]llm\b[^\n.;|]{0,120}\baccepted\b"
+    )
+    for match in re.finditer(bad_pattern, text, flags=re.IGNORECASE | re.MULTILINE | re.DOTALL):
+        context = sentence_context(text, match.start(), match.end())
+        if re.search(local_rejection, context, flags=re.IGNORECASE | re.DOTALL):
+            continue
+        return True
+    return False
+
+
+def metric_values(value: Any, metric_name: str) -> list[Any]:
+    values: list[Any] = []
+    needle = metric_name.lower()
+    if isinstance(value, dict):
+        metric_id = str(value.get("metric_id") or value.get("metric") or value.get("name") or "").lower()
+        if needle in metric_id and "value" in value:
+            values.append(value["value"])
+        for key, child in value.items():
+            if needle in key.lower() and not isinstance(child, (dict, list)):
+                values.append(child)
+            values.extend(metric_values(child, metric_name))
+    elif isinstance(value, list):
+        for child in value:
+            values.extend(metric_values(child, metric_name))
+    return values
+
+
+def is_zero(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return value == 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"0", "0.0", "zero"}
+    return False
+
+
+def ref_path(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        path = value_for_alias(value, {"path", "log", "source_log_path", "checkpoint_path"})
+        return path if isinstance(path, str) else None
+    return None
+
+
+def resolve_store_ref(store: Path, value: Any) -> Path | None:
+    raw = ref_path(value)
+    if not raw:
+        return None
+    path = Path(raw)
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    workspace = workspace_for_store(store).resolve()
+    for base in (store, workspace):
+        candidate = (base / path).resolve()
+        try:
+            candidate.relative_to(workspace)
+        except ValueError:
+            continue
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def check_terminal_file_ref(store: Path, terminal: dict[str, Any], key: str, expected_rel: str, errors: list[str]) -> None:
+    expected = (store / expected_rel).resolve()
+    resolved = resolve_store_ref(store, terminal.get(key))
+    if resolved != expected:
+        errors.append(f"terminal {key} does not resolve to {expected_rel}")
+
+
+def metric_ref_matches(
+    ref: Any,
+    ledger_by_hash: dict[str, dict[str, Any]],
+    *,
+    expected_kind: str,
+    required_metric_id: str | None = None,
+    require_zero: bool = False,
+) -> bool:
+    if not isinstance(ref, dict):
+        return False
+    record_hash = ref.get("record_hash")
+    if not isinstance(record_hash, str) or not HEX64.fullmatch(record_hash):
+        return False
+    record = ledger_by_hash.get(record_hash)
+    if not record:
+        return False
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    payload_metric_id = str(payload.get("metric_id") or "")
+    if required_metric_id and payload_metric_id != required_metric_id:
+        return False
+    ref_metric_id = ref.get("metric_id")
+    if isinstance(ref_metric_id, str) and payload_metric_id != ref_metric_id:
+        return False
+    payload_kind = str(payload.get("metric_kind") or payload.get("type") or "").lower()
+    if expected_kind not in payload_kind:
+        return False
+    if "value" in ref and payload.get("value") != ref.get("value"):
+        return False
+    return not require_zero or is_zero(payload.get("value"))
+
+
+def check_terminal_metric_refs(terminal: dict[str, Any], ledger_records: list[dict[str, Any]], errors: list[str]) -> None:
+    ledger_by_hash = {
+        str(record.get("record_hash")): record
+        for record in ledger_records
+        if isinstance(record.get("record_hash"), str)
+    }
+    objective_refs = terminal.get("objective_metric_refs")
+    if not isinstance(objective_refs, list) or not objective_refs:
+        return
+    if not any(metric_ref_matches(ref, ledger_by_hash, expected_kind="objective") for ref in objective_refs):
+        errors.append("terminal objective metric refs do not match append-only ledger records")
+
+    anti_goal_refs = terminal.get("anti_goal_metric_refs")
+    if not isinstance(anti_goal_refs, list) or not anti_goal_refs:
+        return
+    if not any(
+        metric_ref_matches(
+            ref,
+            ledger_by_hash,
+            expected_kind="anti_goal",
+            required_metric_id="single_llm_truth_acceptance_count",
+            require_zero=True,
+        )
+        for ref in anti_goal_refs
+    ):
+        errors.append("terminal anti-goal refs do not match ledger single_llm_truth_acceptance_count == 0")
+
+
+def check_terminal_checkpoint_refs(store: Path, terminal: dict[str, Any], worker_paths: set[Path], errors: list[str]) -> None:
+    refs = terminal.get("accepted_dkr_checkpoints")
+    if not isinstance(refs, list) or not refs:
+        return
+    resolved_workers = {path.resolve() for path in worker_paths}
+    for index, ref in enumerate(refs, start=1):
+        resolved = resolve_store_ref(store, ref)
+        if resolved not in resolved_workers:
+            errors.append(f"accepted DKR checkpoint ref {index} does not resolve to worker progress evidence")
+
+
+def check_terminal(
+    store: Path,
+    terminal: dict[str, Any],
+    records: list[dict[str, Any]],
+    ledger_records: list[dict[str, Any]],
+    worker_paths: set[Path],
+    latest_record: dt.datetime | None,
+    errors: list[str],
+) -> None:
+    for key in (
+        "run_id",
+        "terminal_state",
+        "objective_metric_refs",
+        "anti_goal_metric_refs",
+        "unresolved_flags",
+        "accepted_dkr_checkpoints",
+        "retained_trace_manifest",
+        "consolidation_output",
+        "continuation_packet",
+    ):
+        if key not in terminal:
+            errors.append(f"terminal record missing {key}")
+    if not terminal.get("objective_metric_refs"):
+        errors.append("terminal record has no objective metric refs")
+    if not terminal.get("anti_goal_metric_refs"):
+        errors.append("terminal record has no anti-goal metric refs")
+    if not terminal.get("accepted_dkr_checkpoints"):
+        errors.append("terminal record has no accepted DKR checkpoint refs")
+
+    terminalized_at = parse_time(terminal.get("terminalized_at"))
+    if terminalized_at is None:
+        errors.append("terminal record missing parseable terminalized_at")
+    elif latest_record is not None and terminalized_at < latest_record:
+        errors.append("terminal record predates append-only evidence records")
+
+    values = metric_values([record.get("payload") for record in ledger_records], "single_llm_truth_acceptance_count")
+    if not values:
+        errors.append("missing append-only ledger single_llm_truth_acceptance_count metric read")
+    elif not all(is_zero(value) for value in values):
+        errors.append("single_llm_truth_acceptance_count is not zero")
+
+    check_terminal_file_ref(store, terminal, "retained_trace_manifest", "memory/trace-manifest.v1.jsonl", errors)
+    check_terminal_file_ref(store, terminal, "consolidation_output", "memory/completed-run-consolidation.v1.json", errors)
+    check_terminal_file_ref(store, terminal, "continuation_packet", "memory/continuation-packet.v1.json", errors)
+    check_terminal_metric_refs(terminal, ledger_records, errors)
+    check_terminal_checkpoint_refs(store, terminal, worker_paths, errors)
+
+    if store.name and terminal.get("run_id") and str(terminal["run_id"]) != store.name:
+        errors.append(f"terminal run_id does not match store path: {terminal['run_id']} != {store.name}")
+
+
+def check_consolidation(consolidation: dict[str, Any], terminal_path: Path, errors: list[str]) -> None:
+    text = payload_text(consolidation)
+    for marker in (
+        "trap",
+        "avoidance",
+        "misconception",
+        "optimization",
+        "candidate_anti",
+        "trace_manifest",
+        "no_regression",
+    ):
+        if marker not in text:
+            errors.append(f"consolidation missing {marker}")
+    terminal_hash = consolidation.get("terminal_record_hash")
+    if not isinstance(terminal_hash, str) or not HEX64.fullmatch(terminal_hash):
+        errors.append("consolidation missing 64-char terminal_record_hash")
+    elif terminal_hash != file_hash(terminal_path):
+        errors.append("consolidation terminal_record_hash does not match terminal record")
+
+
+def check_continuation(continuation: dict[str, Any], errors: list[str]) -> None:
+    text = payload_text(continuation)
+    if "candidate" not in text:
+        errors.append("continuation packet does not keep reuse candidate-only")
+    if "load_first" not in continuation:
+        errors.append("continuation packet missing load_first")
+    if "do_not_assume" not in continuation:
+        errors.append("continuation packet missing do_not_assume")
+    for marker in ("freshness", "context", "human"):
+        if marker not in text:
+            errors.append(f"continuation packet missing {marker} recheck/ratification boundary")
+
+
+def check_trace_manifest(store: Path, errors: list[str]) -> None:
+    workspace = workspace_for_store(store)
+    workspace_resolved = workspace.resolve()
+    content_dir = content_dir_for_store(store)
+    path = store / "memory" / "trace-manifest.v1.jsonl"
+    lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()] if path.exists() else []
+    if not lines:
+        errors.append("trace manifest is empty")
+        return
+    for lineno, line in enumerate(lines, start=1):
+        label = f"{path}:{lineno}"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"{label}: invalid json: {exc}")
+            continue
+        if not isinstance(record, dict):
+            errors.append(f"{label}: trace record must be an object")
+            continue
+        keys = normalized_keys(record)
+        content_hash = record.get("content_hash") or record.get("sha256")
+        excerpt_hash = record.get("excerpt_hash")
+        if not isinstance(content_hash, str) or not HEX64.fullmatch(content_hash):
+            errors.append(f"{label}: missing 64-char content hash")
+        elif not (content_dir / content_hash).is_file():
+            errors.append(f"{label}: trace content hash is not retained: {content_hash}")
+        if not isinstance(excerpt_hash, str) or not HEX64.fullmatch(excerpt_hash):
+            errors.append(f"{label}: missing 64-char excerpt_hash")
+        required_keys = {
+            "causal_decision_path": {"causal_decision_path"},
+            "sensitivity": {"sensitivity"},
+            "redaction_status": {"redaction_status"},
+            "retention_tier": {"retention_tier"},
+            "memory_records": {"memory_records", "depends_memory_records", "dependent_memory_records"},
+        }
+        for key, accepted in required_keys.items():
+            if not (keys & accepted):
+                errors.append(f"{label}: missing {key}")
+        source_path = record.get("path") or record.get("source_log_path") or record.get("source")
+        if not isinstance(source_path, str) or not source_path:
+            errors.append(f"{label}: missing trace source path")
+        elif content_hash:
+            source = Path(source_path)
+            if source.is_absolute() or ".." in source.parts:
+                errors.append(f"{label}: trace source path escapes workspace: {source_path}")
+                continue
+            candidate = (workspace / source).resolve()
+            try:
+                candidate.relative_to(workspace_resolved)
+            except ValueError:
+                errors.append(f"{label}: trace source path escapes workspace: {source_path}")
+                continue
+            if candidate.is_file() and file_hash(candidate) != content_hash:
+                errors.append(f"{label}: content hash does not match {source_path}")
+            elif not candidate.is_file() and isinstance(content_hash, str) and HEX64.fullmatch(content_hash):
+                if not (content_dir / content_hash).is_file():
+                    errors.append(f"{label}: trace source missing and content hash is not retained: {source_path}")
+
+
+def check_status(store: Path, errors: list[str]) -> None:
+    status = store / "status.md"
+    if not status.exists():
+        errors.append("missing generated status.md")
+        return
+    text = status.read_text(encoding="utf-8", errors="replace")
+    if "Generated from append-only source records." not in text or "Do not edit it by hand." not in text:
+        errors.append("status.md is not the generated helper status")
+
+
+def check_content_store(store: Path, records: list[dict[str, Any]], errors: list[str]) -> None:
+    content_dir = content_dir_for_store(store)
+    if not content_dir.is_dir():
+        errors.append("missing .okra/content/sha256")
+        return
+    for path in sorted(content_dir.iterdir()):
+        if path.is_file() and path.name.startswith(".tmp."):
+            continue
+        if path.is_file() and (not HEX64.fullmatch(path.name) or file_hash(path) != path.name):
+            errors.append(f"content-addressed file hash mismatch: {path}")
+    for record in records:
+        for item in walk_dicts(record.get("payload")):
+            for key, value in item.items():
+                if key in {"content_sha256", "source_content_sha256", "target_content_sha256"}:
+                    if isinstance(value, str) and HEX64.fullmatch(value) and not (content_dir / value).is_file():
+                        errors.append(f"missing referenced content hash: {value}")
+
+
+def check_frame_tree(store: Path, errors: list[str]) -> None:
+    frame_current = store / "frame" / "current"
+    tree_current = store / "tree" / "current"
+    if not frame_current.is_file():
+        errors.append("missing frame/current pointer")
+    if not tree_current.is_file():
+        errors.append("missing tree/current pointer")
+
+    frame = load_json(store / "frame" / "frame.v1.json", "frame", errors)
+    if frame:
+        required_frame = {
+            "frame_version",
+            "frame_hash",
+            "objective",
+            "anti_goals",
+            "metric_contracts",
+            "action_envelope",
+        }
+        missing = sorted(required_frame - set(frame))
+        if missing:
+            errors.append(f"frame missing keys: {', '.join(missing)}")
+        text = payload_text(frame)
+        if "ratification" not in text and "approval" not in text and "human" not in text:
+            errors.append("frame missing human approval/ratification evidence")
+
+    tree = load_json(store / "tree" / "tree.v1.json", "tree", errors)
+    if tree:
+        required_tree = {"tree_version", "frame_version", "orchestrator", "dkrs", "ckrs", "pkrs"}
+        missing = sorted(required_tree - set(tree))
+        if missing:
+            errors.append(f"tree missing keys: {', '.join(missing)}")
+        orchestrator_text = payload_text(tree.get("orchestrator"))
+        if "objective checks" not in orchestrator_text:
+            errors.append("tree orchestrator missing objective checks ownership")
+        if "subagent steering" not in orchestrator_text:
+            errors.append("tree orchestrator missing subagent steering ownership")
+
+
+def check_store(store: Path) -> list[str]:
+    errors: list[str] = []
+    if not store.is_dir():
+        return [f"missing run store: {store}"]
+
+    for rel in REQUIRED_FILES:
+        if not (store / rel).is_file():
+            errors.append(f"missing required run-store file: {rel}")
+
+    check_frame_tree(store, errors)
+    terminal_path = store / "terminal" / "run-terminal.v1.json"
+    terminal = load_json(terminal_path, "terminal record", errors)
+    consolidation = load_json(store / "memory" / "completed-run-consolidation.v1.json", "completed-run consolidation", errors)
+    continuation = load_json(store / "memory" / "continuation-packet.v1.json", "continuation packet", errors)
+
+    logs: list[dict[str, Any]] = []
+    ledger_records: list[dict[str, Any]] = []
+    latest_times: list[dt.datetime] = []
+    for name, require_nonempty in (("ledger", True), ("checkins", True), ("flags", False)):
+        records, latest = load_log(store / f"{name}.jsonl", errors, require_nonempty=require_nonempty)
+        if name == "ledger":
+            ledger_records = records
+        logs.extend(records)
+        if latest is not None:
+            latest_times.append(latest)
+
+    worker_paths = sorted((store / "workers").glob("*/progress.jsonl")) if (store / "workers").exists() else []
+    if not worker_paths:
+        errors.append("missing worker progress evidence")
+    for path in worker_paths:
+        records, latest = load_log(path, errors, require_nonempty=True)
+        logs.extend(records)
+        if latest is not None:
+            latest_times.append(latest)
+
+    latest_record = max(latest_times) if latest_times else None
+    if terminal:
+        check_terminal(store, terminal, logs, ledger_records, {path.resolve() for path in worker_paths}, latest_record, errors)
+    if consolidation:
+        check_consolidation(consolidation, terminal_path, errors)
+    if continuation:
+        check_continuation(continuation, errors)
+    if (store / "memory" / "trace-manifest.v1.jsonl").exists():
+        check_trace_manifest(store, errors)
+    check_status(store, errors)
+    check_content_store(store, logs, errors)
+
+    all_values: list[Any] = [terminal, consolidation, continuation, [record.get("payload") for record in logs]]
+    if contains_forbidden_single_llm_acceptance(all_values):
+        errors.append("single LLM/model report is treated as sufficient proof")
+    review_values: list[Any] = [terminal, consolidation, continuation]
+    entries = review_entries(review_values)
+    if not entries:
+        errors.append("missing structured review_set evidence")
+    for index, entry in enumerate(entries, start=1):
+        missing = review_entry_missing_fields(entry)
+        if missing:
+            errors.append(f"review_set entry {index} missing fields: {', '.join(missing)}")
+    has_review_gap = review_gap_is_explicit(review_values, entries)
+    if entries and not has_completed_reviews(entries, workspace_for_store(store)) and not has_review_gap:
+        errors.append("review_set has no completed two-review evidence and no explicit blocked/candidate state")
+    if has_review_gap and contains_review_gap_acceptance(review_values):
+        errors.append("review gap is paired with accepted/reusable memory promotion")
+
+    return errors
+
+
+def hash_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def write_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
+def append_calibration_record(path: Path, payload: dict[str, Any], recorded_at: str) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] if path.exists() else []
+    prev = "GENESIS"
+    seq = 1
+    if lines:
+        previous = json.loads(lines[-1])
+        prev = previous["record_hash"]
+        seq = int(previous["seq"]) + 1
+    record = {
+        "seq": seq,
+        "recorded_at": recorded_at,
+        "prev_hash": prev,
+        "payload_sha256": canonical_hash(payload),
+        "payload": payload,
+    }
+    record["record_hash"] = canonical_hash(record)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
+    return record
+
+
+def calibration_review_entries(*, count: int = 2, pending: bool = False, artifact_dir: str = "reviews") -> list[dict[str, Any]]:
+    entries = []
+    for index in range(count):
+        name = "codex" if index == 0 else "claude"
+        verdict = "pending_not_accepted" if pending else "pass"
+        entries.append(
+            {
+                "reviewer_kind": name,
+                "tool_model": f"{name}/calibration",
+                "prompt_hash": hash_text(f"prompt-{index}"),
+                "source_content_hash": hash_text("source"),
+                "verdict": verdict,
+                "objections_or_dissent": "no unresolved findings" if not pending else "review unavailable in fixture",
+                "confidence": 0.8 if not pending else 0,
+                "independence_basis": "separate calibration review artifact",
+                "conflict_status": "none" if not pending else "blocked_pending_review",
+                "artifact_path": f"{artifact_dir}/{name}.md",
+                "artifact_hash": hash_text(f"{name} review"),
+            }
+        )
+    return entries
+
+
+def build_calibration_store(workspace: Path, variant: str) -> Path:
+    workspace.mkdir(parents=True, exist_ok=True)
+    source_text = "Prior runs are candidate inputs, not authority.\n"
+    source_hash = hash_text(source_text)
+    excerpt_hash = hash_text("Prior runs are candidate inputs, not authority.")
+    source = workspace / "README.md"
+    source.write_text(source_text, encoding="utf-8")
+    content_dir = workspace / ".okra" / "content" / "sha256"
+    content_dir.mkdir(parents=True)
+    (content_dir / source_hash).write_text(source_text, encoding="utf-8")
+
+    review_artifact_dir = ".okra/reviews" if variant == "self-authored-review-artifact" else "reviews"
+    reviews_dir = workspace / review_artifact_dir
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("codex", "claude"):
+        (reviews_dir / f"{name}.md").write_text(f"{name} review", encoding="utf-8")
+
+    store = workspace / ".okra" / "runs" / "calibration-memory"
+    for child in ("terminal", "memory", "workers/dkr-memory", "frame", "tree"):
+        (store / child).mkdir(parents=True, exist_ok=True)
+    for log in ("ledger", "checkins", "flags"):
+        (store / f"{log}.jsonl").touch()
+
+    objective_record = append_calibration_record(
+        store / "ledger.jsonl",
+        {
+            "type": "objective_metric_read",
+            "metric_id": "completed_run_memory_value_score",
+            "metric_kind": "objective",
+            "value": 1,
+            "observed_at": "2026-06-29T00:00:00Z",
+            "source": "calibration",
+            "freshness": "fresh",
+        },
+        "2026-06-29T00:00:00Z",
+    )
+    anti_goal_record: dict[str, Any] | None = None
+    if variant != "missing-ledger-single-llm":
+        anti_goal_record = append_calibration_record(
+            store / "ledger.jsonl",
+            {
+                "type": "anti_goal_metric_read",
+                "metric_id": "single_llm_truth_acceptance_count",
+                "metric_kind": "anti_goal",
+                "value": 0,
+                "observed_at": "2026-06-29T00:00:01Z",
+                "source": "calibration",
+                "freshness": "fresh",
+            },
+            "2026-06-29T00:00:01Z",
+        )
+    if variant == "undated-record":
+        records = []
+        for line in (store / "ledger.jsonl").read_text(encoding="utf-8").splitlines():
+            record = json.loads(line)
+            record.pop("recorded_at", None)
+            records.append(json.dumps(record, sort_keys=True, separators=(",", ":")))
+        (store / "ledger.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
+    append_calibration_record(
+        store / "workers" / "dkr-memory" / "progress.jsonl",
+        {
+            "type": "dkr_progress",
+            "steering_decision": "verify terminal memory before reuse",
+            "risk_or_anti_goal_uncertainty": "single LLM truth acceptance",
+            "learning_collected": "terminal proof needs retained trace hashes",
+            "confidence": 0.8,
+        },
+        "2026-06-29T00:00:02Z",
+    )
+
+    if variant == "one-review-no-gap":
+        review_set = calibration_review_entries(count=1, artifact_dir=review_artifact_dir)
+    elif variant in {"pending-review-gap", "pending-review-accepted"}:
+        review_set = calibration_review_entries(count=1, pending=True, artifact_dir=review_artifact_dir)
+    else:
+        review_set = calibration_review_entries(count=2, artifact_dir=review_artifact_dir)
+    if variant == "negated-blocker-with-critical":
+        for entry in review_set:
+            entry["objections_or_dissent"] = "No blockers in the first screen. Critical unresolved finding remains; must fix before release."
+
+    checkin_payload: dict[str, Any] = {
+        "type": "acceptance_evidence_checkin",
+        "single_llm_truth_acceptance_count": 0,
+        "review_set": review_set,
+        "evidence_refs": [{"content_sha256": source_hash}],
+    }
+    if variant == "single-model-sufficiency":
+        checkin_payload["local_rejection"] = "A single LLM report is not enough proof."
+        checkin_payload["bad_policy"] = "Later, one model report is sufficient proof."
+    append_calibration_record(store / "checkins.jsonl", checkin_payload, "2026-06-29T00:00:03Z")
+
+    if variant == "fake-review-artifact":
+        for path in reviews_dir.glob("*.md"):
+            path.unlink()
+    if variant == "missing-retained-trace":
+        (content_dir / source_hash).unlink()
+
+    frame = {
+        "frame_version": "v1",
+        "frame_hash": hash_text("frame"),
+        "objective": {"metric_id": "completed_run_memory_value_score", "target": 1},
+        "anti_goals": [{"metric_id": "single_llm_truth_acceptance_count", "target": 0}],
+        "metric_contracts": [{"metric_id": "completed_run_memory_value_score", "max_age": "1d"}],
+        "action_envelope": {"allowed": ["verify"], "human_ratification": "fixture approval"},
+        "human_ratification_evidence": "fixture approval",
+    }
+    tree = {
+        "tree_version": "v1",
+        "frame_version": "v1",
+        "orchestrator": "owns objective checks and subagent steering",
+        "dkrs": [{"id": "dkr-memory"}],
+        "ckrs": [{"id": "memory-value"}],
+        "pkrs": [{"id": "terminal-store-check"}],
+    }
+    if variant != "missing-frame-tree":
+        write_json(store / "frame" / "frame.v1.json", frame)
+        (store / "frame" / "current").write_text("frame.v1.json\n", encoding="utf-8")
+        write_json(store / "tree" / "tree.v1.json", tree)
+        (store / "tree" / "current").write_text("tree.v1.json\n", encoding="utf-8")
+
+    trace_path = "/etc/passwd" if variant == "absolute-trace-path" else "README.md"
+    trace = {
+        "path": trace_path,
+        "content_hash": source_hash,
+        "excerpt_hash": excerpt_hash,
+        "causal_decision_path": "prior-run candidate signal -> terminal trace retained",
+        "sensitivity": "public fixture",
+        "redaction_status": "none",
+        "retention_tier": "source",
+        "memory_records": ["completed-run-consolidation.v1.json"],
+    }
+    (store / "memory" / "trace-manifest.v1.jsonl").write_text(json.dumps(trace, sort_keys=True) + "\n", encoding="utf-8")
+
+    objective_refs = [
+        {
+            "log": "ledger.jsonl",
+            "metric_id": "completed_run_memory_value_score",
+            "record_hash": objective_record["record_hash"],
+            "value": 1,
+        }
+    ]
+    anti_goal_refs = [
+        {
+            "log": "ledger.jsonl",
+            "metric_id": "single_llm_truth_acceptance_count",
+            "record_hash": anti_goal_record["record_hash"] if anti_goal_record else "0" * 64,
+            "value": 0,
+        }
+    ]
+    accepted_dkr_checkpoints = ["workers/dkr-memory/progress.jsonl"]
+    if variant == "unlinked-terminal-refs":
+        objective_refs = [
+            {
+                "log": "ledger.jsonl",
+                "metric_id": "completed_run_memory_value_score",
+                "record_hash": "f" * 64,
+                "value": 1,
+            }
+        ]
+        anti_goal_refs = [
+            {
+                "log": "ledger.jsonl",
+                "metric_id": "single_llm_truth_acceptance_count",
+                "record_hash": "e" * 64,
+                "value": 0,
+            }
+        ]
+        accepted_dkr_checkpoints = ["workers/missing/progress.jsonl"]
+
+    terminal = {
+        "run_id": "calibration-memory",
+        "terminalized_at": "2026-06-29T00:10:00Z",
+        "terminal_state": "target_reached",
+        "objective_metric_refs": objective_refs,
+        "anti_goal_metric_refs": anti_goal_refs,
+        "unresolved_flags": [],
+        "accepted_dkr_checkpoints": accepted_dkr_checkpoints,
+        "retained_trace_manifest": "memory/trace-manifest.v1.jsonl",
+        "consolidation_output": "memory/completed-run-consolidation.v1.json",
+        "continuation_packet": "memory/continuation-packet.v1.json",
+        "review_set": review_set,
+    }
+    write_json(store / "terminal" / "run-terminal.v1.json", terminal)
+
+    consolidation: dict[str, Any] = {
+        "run_id": "calibration-memory",
+        "terminal_record_hash": file_hash(store / "terminal" / "run-terminal.v1.json"),
+        "extracted_traps": ["single LLM truth acceptance"],
+        "extracted_avoidances": ["structured review_set gate"],
+        "extracted_misconceptions": ["continuation packet is not authority"],
+        "extracted_optimizations": ["trace manifest with content and excerpt hashes"],
+        "candidate_anti_goals": ["single_llm_truth_acceptance_count == 0"],
+        "trace_manifest_refs": ["memory/trace-manifest.v1.jsonl"],
+        "no_regression_evidence": ["calibration pass"],
+        "review_set": review_set,
+    }
+    if variant == "missing-terminal-hash":
+        consolidation.pop("terminal_record_hash")
+    if variant == "pending-review-gap":
+        consolidation["memory_promotion_status"] = "blocked pending review; not accepted"
+    if variant == "pending-review-accepted":
+        consolidation["memory_promotion_status"] = "accepted_reusable_despite_pending_review"
+    write_json(store / "memory" / "completed-run-consolidation.v1.json", consolidation)
+
+    continuation = {
+        "run_id": "calibration-memory",
+        "candidate_inputs": ["prior traps remain candidate-only"],
+        "load_first": ["terminal/run-terminal.v1.json", "memory/trace-manifest.v1.jsonl"],
+        "do_not_assume": [
+            "Recheck freshness before reuse.",
+            "Recheck context fit before reuse.",
+            "Require human ratification before guardrail changes.",
+        ],
+    }
+    write_json(store / "memory" / "continuation-packet.v1.json", continuation)
+    (store / "status.md").write_text(
+        "# OKRA Store Status\n\nGenerated from append-only source records.\n\nThis file is a generated view. Do not edit it by hand.\n",
+        encoding="utf-8",
+    )
+    return store
+
+
+def calibrate(_: Path | None = None) -> int:
+    expected_failures = {
+        "one-review-no-gap": "review_set has no completed two-review evidence",
+        "fake-review-artifact": "review_set has no completed two-review evidence",
+        "missing-frame-tree": "missing required run-store file",
+        "missing-ledger-single-llm": "missing append-only ledger single_llm_truth_acceptance_count metric read",
+        "undated-record": "missing parseable recorded_at",
+        "missing-retained-trace": "trace content hash is not retained",
+        "negated-blocker-with-critical": "review_set has no completed two-review evidence",
+        "pending-review-accepted": "review gap is paired with accepted/reusable memory promotion",
+        "single-model-sufficiency": "single LLM/model report is treated as sufficient proof",
+        "absolute-trace-path": "trace source path escapes workspace",
+        "missing-terminal-hash": "terminal_record_hash",
+        "self-authored-review-artifact": "review_set has no completed two-review evidence",
+        "unlinked-terminal-refs": "terminal objective metric refs do not match append-only ledger records",
+    }
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="okra-terminal-run-store-") as tmp:
+        root = Path(tmp)
+        pass_store = build_calibration_store(root / "pass", "pass")
+        pass_errors = check_store(pass_store)
+        if pass_errors:
+            failures.append("pass fixture failed: " + "; ".join(pass_errors))
+
+        pending_store = build_calibration_store(root / "pending", "pending-review-gap")
+        pending_errors = check_store(pending_store)
+        if pending_errors:
+            failures.append("pending review-gap fixture failed: " + "; ".join(pending_errors))
+
+        for variant, expected in expected_failures.items():
+            store = build_calibration_store(root / variant, variant)
+            errors = check_store(store)
+            detail = "; ".join(errors)
+            if not errors:
+                failures.append(f"{variant}: expected failure, got pass")
+            elif expected not in detail:
+                failures.append(f"{variant}: expected {expected!r}, got {detail!r}")
+
+    if failures:
+        print("okra terminal run-store calibration failed:", file=sys.stderr)
+        for failure in failures:
+            print(f"- {failure}", file=sys.stderr)
+        return 1
+    print(f"okra terminal run-store calibration ok: 2 pass, {len(expected_failures)} fail")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("store", nargs="?", type=Path, help="run-scoped OKRA store, for example .okra/runs/default-dogfood-memory")
+    parser.add_argument("--calibrate", type=Path, help="run built-in pass/fail calibration; path is accepted for runner compatibility")
+    args = parser.parse_args()
+    if args.calibrate is not None:
+        return calibrate(args.calibrate)
+    if args.store is None:
+        parser.error("store is required unless --calibrate is used")
+    errors = check_store(args.store)
+    if errors:
+        print("OKRA terminal run-store violations:", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+    print(f"ok: {args.store}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

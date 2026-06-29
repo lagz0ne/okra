@@ -1,0 +1,53 @@
+# Default OKRA Dogfood
+
+This fixture intentionally relies on project instructions instead of an explicit user prompt naming
+the skill. For non-trivial planning or memory work in this repository, use the project-local
+`reverse-tornado-okr` skill by default. If the runtime does not auto-load project skills, read
+`.codex/skills/reverse-tornado-okr/SKILL.md` or `.claude/skills/reverse-tornado-okr/SKILL.md`
+before working.
+
+Default anti-goal:
+
+- `single_llm_truth_acceptance_count == 0`, tripwire. Do not accept semantic memory claims,
+  completed-run status, or guardrail promotion from one model narrative alone.
+
+Expected dogfood behavior:
+
+- Draft a measured objective and measured anti-goals before planning.
+- The task artifact must be a full operating-loop plan, not only an implementation note. Include
+  the exact objective metric `memory_progression_design_confidence >= 0.85`, candidate frame status,
+  human ratification boundary, action envelope, freshness contract, lag/measurement window, DKR,
+  CKR, PKR sections, CKR-level discovery/delivery balance, PKR progress signals, and all flags:
+  `cannot`, `breaking`, `pointless`, and `authority_drift`.
+- Treat previous-run notes as automatic candidate inputs, not authority.
+- Define a completed-run terminal proof and continuation packet before memory reuse.
+- Keep a run-scoped `.okra/runs/default-dogfood-memory` store with append-only metric/check-in
+  evidence, terminal proof, consolidation output, continuation packet, trace manifest, and generated
+  status before claiming completed-run memory is reusable.
+- The task artifact and store must name these exact terminal files:
+  `run-terminal.v1.json`, `completed-run-consolidation.v1.json`,
+  `continuation-packet.v1.json`, and `trace-manifest.v1.jsonl`.
+- `terminal/run-terminal.v1.json` must include these exact keys: `terminal_state`,
+  `terminalized_at`, `objective_metric_refs`, `anti_goal_metric_refs`, `unresolved_flags`,
+  `accepted_dkr_checkpoints`, `retained_trace_manifest`, `consolidation_output`, and
+  `continuation_packet`.
+- `memory/completed-run-consolidation.v1.json` must include `terminal_record_hash`, traps,
+  avoidances, misconceptions, optimizations, candidate anti-goals, `trace_manifest` refs,
+  no-regression evidence, and structured `review_set` evidence.
+- `memory/continuation-packet.v1.json` must include `load_first`, `do_not_assume`, candidate-only
+  status, freshness recheck, context-fit recheck, and human-ratification boundary.
+- Every `trace-manifest.v1.jsonl` line must include a workspace-relative `path` or
+  `source_log_path`, `content_hash` or `sha256`, `excerpt_hash`, `causal_decision_path`,
+  `sensitivity`, `redaction_status`, `retention_tier`, and `memory_records`.
+- Keep previous-run memory candidate-only until current-run evidence and human ratification justify
+  a frame or guardrail change.
+- Require deterministic evidence where possible and independent review or human ratification for
+  judgement-heavy memory promotion.
+- If a real second-opinion review artifact is unavailable, record the gap as blocked or pending;
+  do not accept the current model's narrative as sufficient proof.
+- Represent the review gap with a structured `review_set` entry that still carries reviewer kind,
+  tool/model, prompt hash, source/content hash, verdict, objections or dissent, confidence,
+  independence basis, conflict status, artifact path, and artifact hash for the gap artifact.
+- Verify value with reset replay, counterfactual/negative evals, scored blindbox evals, and
+  repeated-mistake metrics such as `prior_run_scan_miss_count == 0`, `trace_loss_reuse_count == 0`,
+  `stale_learning_reuse_count == 0`, and `unratified_memory_promotion_count == 0`.

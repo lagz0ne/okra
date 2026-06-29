@@ -1,0 +1,41 @@
+{
+  "type": "steering_checkin",
+  "round": 1,
+  "frame_hash": "0e8295a49f84e0c41d71907e5065f800a6e07487eebaa38be43852034490f8a1",
+  "tree_hash": "2707b55d1d8e35c4e9626c35fa463b4d40db1ebb9218854cb6a99aa053896c2c",
+  "objective_read": {
+    "metric_id": "terminal_memory_checker_calibrated",
+    "value": 1,
+    "target": 1
+  },
+  "anti_goal_read": {
+    "metric_id": "single_llm_truth_acceptance_count",
+    "value": 0,
+    "target": 0
+  },
+  "dkr_learning_checkpoint": {
+    "status": "accepted_for_checker_implementation",
+    "worker_progress_refs": [
+      ".okra/runs/20260629-terminal-memory-verifier/workers/dkr-verifier-contract/progress.jsonl"
+    ],
+    "decision_unlocked": "wire okra_terminal_memory into default-dogfood validation"
+  },
+  "worker_progress_refs": [
+    ".okra/runs/20260629-terminal-memory-verifier/workers/dkr-verifier-contract/progress.jsonl"
+  ],
+  "pkr_signals": {
+    "checker_added": 1,
+    "runner_wired": 1,
+    "dogfood_case_wired": 1,
+    "scored_eval_ran": 0
+  },
+  "open_flags": [
+    "cannot:scored-eval-not-run"
+  ],
+  "learning_collected": [
+    "Value verification needs explicit reset replay, counterfactual eval, scored eval, and repeated-mistake metrics.",
+    "Terminalized memory value can be checked by requiring trace retention and evidence gates in generated plans."
+  ],
+  "next_check_at": "2026-06-29T08:24:52Z",
+  "steering_decision": "Accept local verifier wiring; keep scored eval as next-run candidate."
+}

@@ -1,0 +1,26 @@
+{
+  "type": "worker_progress",
+  "worker_kind": "dkr",
+  "worker_id": "dkr-verifier-contract",
+  "steering_decision": "Add a deterministic terminal-memory checker instead of relying on prose that terminalized memory is valuable.",
+  "risk_or_anti_goal_uncertainty": "A model can say 'trace manifest' and 'continuation packet' without requiring terminal metric refs, candidate-only reuse, evidence, or reset value verification.",
+  "learning_collected": [
+    "The existing okra_learning_memory checker covers prior-run candidate-only behavior but not terminal run proof.",
+    "A separate okra_terminal_memory checker can target terminal artifacts, retained traces, evidence gates, and value verification.",
+    "The dogfood case should include this checker because its prompt specifically asks for useful completed-run memory after reset."
+  ],
+  "probability_update": {
+    "terminal_memory_checker_calibrated_before": 0.35,
+    "terminal_memory_checker_calibrated_after": 1
+  },
+  "candidate_ckrs": [
+    "ckr.checker_calibration",
+    "ckr.runner_wiring",
+    "ckr.dogfood_eval_alignment"
+  ],
+  "next_unknowns": [
+    "Whether a scored model output passes the stricter checker without prompt injection.",
+    "Whether independent review finds regex holes that deterministic goldens missed."
+  ],
+  "next_report_at": "2026-06-29T08:24:52Z"
+}

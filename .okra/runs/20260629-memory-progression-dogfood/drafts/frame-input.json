@@ -1,0 +1,77 @@
+{
+  "frame_version": "frame.v1",
+  "frame_hash": "72c4ca20ece13424225dcc42eb20515dc393ce54574d80bbf108a50b0f8b8543",
+  "objective": {
+    "metric_id": "memory_progression_default_dogfood_ready",
+    "target": 1,
+    "unit": "ready_surface",
+    "definition": "Default dogfooding is documented, eval-aligned, and completed-run memory has terminalization plus continuation trace contracts."
+  },
+  "anti_goals": [
+    {
+      "metric_id": "single_llm_truth_acceptance_count",
+      "target": 0,
+      "type": "tripwire",
+      "definition": "No semantic memory, completion, or guardrail claim is accepted from one model narrative alone."
+    },
+    {
+      "metric_id": "unratified_memory_promotion_count",
+      "target": 0,
+      "type": "tripwire",
+      "definition": "Previous-run learning stays candidate-only until current evidence and human ratification justify promotion."
+    },
+    {
+      "metric_id": "trace_loss_reuse_count",
+      "target": 0,
+      "type": "tripwire",
+      "definition": "No completed-run learning is reused without retained traces, consolidation output, and continuation packet."
+    }
+  ],
+  "metric_contracts": {
+    "memory_progression_default_dogfood_ready": {
+      "source": "repository diff plus deterministic validation commands",
+      "max_age": "current turn",
+      "freshness_rule": "command outputs recorded during this run are fresh for the final report"
+    },
+    "single_llm_truth_acceptance_count": {
+      "source": "deterministic checks plus independent review attempts or review set evidence",
+      "max_age": "current turn",
+      "freshness_rule": "must be read before completion claim"
+    }
+  },
+  "action_envelope": {
+    "allowed_moves": [
+      "edit project dogfooding docs",
+      "edit OKRA skill memory guidance",
+      "edit blindbox runner/case fixtures",
+      "append run-scoped .okra records",
+      "run deterministic validation and dry-run dispatch"
+    ],
+    "forbidden_moves": [
+      "commit or push without explicit user request",
+      "claim scored model review passed when API-backed review was unavailable",
+      "promote prior-run memory as authority without ratification"
+    ],
+    "approval_gates": [
+      "human owns objective, anti-goals, guardrail thresholds, and action envelope"
+    ]
+  },
+  "anti_goal_coverage_review": {
+    "selected_guardrails": [
+      "single_llm_truth_acceptance_count == 0",
+      "unratified_memory_promotion_count == 0",
+      "trace_loss_reuse_count == 0"
+    ],
+    "rejected_guardrails": [
+      {
+        "guardrail": "require external scored review before any local artifact can exist",
+        "rationale": "environment can block model API review; record blocker and keep deterministic evidence instead of hiding the gap"
+      }
+    ]
+  },
+  "human_approval": {
+    "ratification_status": "ratified_by_user_direction",
+    "source": "user requested default dogfooding, eval alignment, full-cycle memory strategy, and anti-goal of no single LLM trust; user then granted permission and resumed implementation",
+    "ratified_at": "2026-06-29T07:25:20Z"
+  }
+}

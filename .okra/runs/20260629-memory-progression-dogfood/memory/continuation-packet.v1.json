@@ -1,0 +1,63 @@
+{
+  "authority": "candidate inputs only; does not change frame, guardrails, metrics, thresholds, or action envelope",
+  "candidate_inputs": [
+    "single LLM truth tripwire",
+    "terminal proof ordering",
+    "trace hash retention",
+    "blocked review gap handling"
+  ],
+  "context_fit_recheck": "Use only for OKRA memory-progression work in this repository unless human ratifies broader use.",
+  "do_not_assume": [
+    "Do not assume scored default-dogfood evals passed.",
+    "Do not assume semantic memory promotion is approved.",
+    "Do not use this continuation packet without freshness and context-fit recheck."
+  ],
+  "freshness_recheck": {
+    "max_age": "72h for live reuse decisions",
+    "observed_at": "2026-06-29T10:28:57Z"
+  },
+  "human_ratification_boundary": "Human ratification is required before any frame or guardrail change.",
+  "load_first": [
+    ".okra/runs/20260629-memory-progression-dogfood/terminal/run-terminal.v1.json",
+    ".okra/runs/20260629-memory-progression-dogfood/memory/completed-run-consolidation.v1.json",
+    ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl"
+  ],
+  "prepared_at": "2026-06-29T10:28:57Z",
+  "review_set": [
+    {
+      "applies_to_run_id": "20260629-memory-progression-dogfood",
+      "artifact_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/codex.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "codex_review",
+      "source_content_hash": "04bc462f4da2d4c8016c159f7ebfe899436a4df5e197c5349191d2866d0fdf3e",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    },
+    {
+      "applies_to_run_id": "20260629-memory-progression-dogfood",
+      "artifact_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "artifact_path": ".runs/review/20260629T095148Z-diff/claude.md",
+      "confidence": 0.8,
+      "conflict_status": "blocked_pending_remediation",
+      "independence_basis": "separate review wrapper path from implementation narrative",
+      "objections_or_dissent": [
+        "latest diff review reported remaining issues or dogfood store repair requirements"
+      ],
+      "prompt_hash": "4077af93ec4268ad7855115250dccc4b4fff1c3116954056c16a5af71eb38c32",
+      "review_gap_status": "blocked",
+      "reviewer_kind": "claude_review",
+      "source_content_hash": "1b9dbdbf73c7b6969c2d44baf696189665b071b4e8916f62a0128a49b20c04a0",
+      "tool_model": "review wrapper artifact",
+      "verdict": "blocked findings present; not promotion approval"
+    }
+  ],
+  "run_id": "20260629-memory-progression-dogfood"
+}

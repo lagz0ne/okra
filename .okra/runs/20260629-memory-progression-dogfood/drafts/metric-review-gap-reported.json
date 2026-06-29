@@ -1,0 +1,11 @@
+{
+  "type": "anti_goal_metric_read",
+  "metric_kind": "anti_goal",
+  "metric_id": "review_gate_unreported_failure_count",
+  "value": 0,
+  "target": 0,
+  "unit": "unreported_failures",
+  "observed_at": "2026-06-29T07:25:20Z",
+  "source": "review wrapper failure recorded in .runs/review/20260629T071659Z-diff and terminalized as a blocker",
+  "freshness": "observed_at=2026-06-29T07:25:20Z -> status=fresh against max_age=current turn"
+}

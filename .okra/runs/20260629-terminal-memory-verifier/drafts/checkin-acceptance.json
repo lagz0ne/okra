@@ -1,0 +1,40 @@
+{
+  "type": "acceptance_evidence_checkin",
+  "round": 1,
+  "single_llm_truth_acceptance_count": 0,
+  "evidence": [
+    {
+      "kind": "deterministic_command",
+      "command": "python3 evals/blindbox/checks/okra_terminal_memory.py --calibrate evals/blindbox/golden/okra-terminal-memory",
+      "result": "exit 0; 1 pass, 5 fail"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "python3 -m py_compile evals/blindbox/checks/okra_terminal_memory.py scripts/okr-runner.py",
+      "result": "exit 0"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/validate-skills.sh",
+      "result": "exit 0; includes okra terminal-memory calibration"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both --case okra-default-dogfood",
+      "result": "exit 0"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both",
+      "result": "exit 0"
+    }
+  ],
+  "review_set": [
+    {
+      "reviewer": "multi_agent:Lagrange",
+      "status": "pending",
+      "scope": "new terminal-memory checker and eval wiring",
+      "independence_basis": "separate agent review requested during implementation"
+    }
+  ]
+}

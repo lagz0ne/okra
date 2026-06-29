@@ -1,0 +1,74 @@
+{
+  "tree_version": "tree.v1",
+  "tree_hash": "2707b55d1d8e35c4e9626c35fa463b4d40db1ebb9218854cb6a99aa053896c2c",
+  "frame_version": "frame.v1",
+  "orchestrator": {
+    "id": "terminal-memory-verifier-orchestrator",
+    "owns": [
+      "objective checks",
+      "check-ins",
+      "OKR board",
+      "subagent steering",
+      "anti-goal reads"
+    ],
+    "stop_rule": "continue until the objective metric reaches target or a human/blocking flag stops the loop"
+  },
+  "dkrs": [
+    {
+      "id": "dkr.verifier_contract",
+      "worker_scope": "discovery",
+      "budget": "one implementation turn",
+      "decision_target": "which deterministic checks prove the compact terminalized continuation memory skill has value",
+      "risk_or_anti_goal_uncertainty": "false confidence from vocabulary-only memory summaries",
+      "confidence_output": "terminal_memory_checker_calibrated"
+    }
+  ],
+  "ckrs": [
+    {
+      "id": "ckr.checker_calibration",
+      "metric_id": "okra_terminal_memory_calibration_pass",
+      "target": 1,
+      "context": "golden pass/fail corpus catches missing terminal proof, trace proof, evidence, value verification, and automatic authority"
+    },
+    {
+      "id": "ckr.runner_wiring",
+      "metric_id": "runner_knows_okra_terminal_memory",
+      "target": 1,
+      "context": "runner validation, execution, and result hashes know the new check type"
+    },
+    {
+      "id": "ckr.dogfood_eval_alignment",
+      "metric_id": "default_dogfood_terminal_memory_check_count",
+      "target": 1,
+      "context": "okra-default-dogfood requires the terminal-memory checker"
+    }
+  ],
+  "pkrs": [
+    {
+      "id": "pkr.add_checker",
+      "worker_scope": "progression",
+      "progress_signals": [
+        "evals/blindbox/checks/okra_terminal_memory.py added",
+        "goldens under evals/blindbox/golden/okra-terminal-memory added"
+      ]
+    },
+    {
+      "id": "pkr.wire_runner",
+      "worker_scope": "progression",
+      "progress_signals": [
+        "validate_cases accepts okra_terminal_memory",
+        "cmd_validate calibrates okra_terminal_memory",
+        "evaluate_checks executes okra_terminal_memory",
+        "input_hashes records okra_terminal_memory checker hash"
+      ]
+    },
+    {
+      "id": "pkr.update_dogfood_case",
+      "worker_scope": "progression",
+      "progress_signals": [
+        "okra-default-dogfood includes okra_terminal_memory check",
+        "fixture describes reset replay, counterfactual eval, scored eval, and repeated-mistake metrics"
+      ]
+    }
+  ]
+}

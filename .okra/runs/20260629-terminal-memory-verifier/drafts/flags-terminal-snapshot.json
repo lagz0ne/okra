@@ -1,0 +1,25 @@
+{
+  "type": "flag_lifecycle_snapshot",
+  "flags": [
+    {
+      "flag": "cannot",
+      "status": "open",
+      "reason": "scored model evals were not run in this local validation pass"
+    },
+    {
+      "flag": "breaking",
+      "status": "closed",
+      "reason": "local validation and dry-run dispatch passed"
+    },
+    {
+      "flag": "pointless",
+      "status": "closed",
+      "reason": "the checker directly verifies the value contract requested by the user"
+    },
+    {
+      "flag": "authority_drift",
+      "status": "closed",
+      "reason": "compact memory remains candidate policy until human ratification"
+    }
+  ]
+}

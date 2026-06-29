@@ -1,0 +1,27 @@
+{
+  "run_id": "20260629-memory-progression-dogfood",
+  "prepared_at": "2026-06-29T07:25:20Z",
+  "next_run_goal": "Run scored default-dogfood evals and complete independent Codex/Claude diff review when model/API tooling is available.",
+  "candidate_starting_frame": {
+    "objective": "default_dogfood_scored_eval_pass_count >= 2",
+    "anti_goals": [
+      "single_llm_truth_acceptance_count == 0",
+      "review_gap_unreported_count == 0",
+      "trace_loss_reuse_count == 0"
+    ]
+  },
+  "load_first": [
+    ".okra/runs/20260629-memory-progression-dogfood/terminal/run-terminal.v1.json",
+    ".okra/runs/20260629-memory-progression-dogfood/memory/completed-run-consolidation.v1.json",
+    ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl"
+  ],
+  "do_not_assume": [
+    "Do not assume API-backed review passed.",
+    "Do not assume real scored evals passed; only dry-run dispatch was verified.",
+    "Do not promote this packet as authority without current-run evidence and human ratification."
+  ],
+  "recommended_next_commands": [
+    "scripts/review-skill.sh --agent both --mode diff",
+    "CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> scripts/run-blindbox.sh --agent both --case okra-default-dogfood"
+  ]
+}

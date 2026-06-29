@@ -1,0 +1,12 @@
+The new terminal-memory checkers have both a false-negative path for the new prompt wording and a false-positive path for blocking review evidence. The untracked dogfood evidence also does not satisfy the terminal trace schema it introduces.
+
+Full review comments:
+
+- [P2] Accept artifact path/hash wording in review_set checks — /home/lagz0ne/dev/okr/evals/blindbox/checks/okra_terminal_memory.py:198-198
+  When an agent follows the new default-dogfood prompt's wording and lists `artifact path` plus `artifact hash` as separate `review_set` fields, `missing_review_fields()` still reports `path/hash` missing because this regex only accepts the literal `path/hash` or `path and hash`. That makes `okra_terminal_memory` fail compliant artifacts for the new case, so the eval can false-negative on the wording it asks agents to produce.
+
+- [P2] Treat blocking review verdicts as unresolved evidence — /home/lagz0ne/dev/okr/evals/blindbox/checks/okra_terminal_run_store.py:214-225
+  When a store contains two completed `review_set` entries whose artifacts hash but whose verdict/conflict fields are blocking, `has_completed_reviews()` counts them as sufficient because it only checks for a 64-character artifact hash and absence of pending markers. That lets terminal memory be accepted without an explicit blocked/candidate state even though the independent reviews rejected it, weakening the no-single-LLM gate.
+
+- [P2] Regenerate terminal trace manifests before committing — /home/lagz0ne/dev/okr/.okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl:1-1
+  If this untracked `.okra` run store is intended as acceptance evidence, its trace manifest entries only include `path`, `sha256`, and `reason`; the newly added terminal run-store checker requires fields like `excerpt_hash`, `causal_decision_path`, sensitivity/redaction/retention metadata, and dependent memory records. Committing this store as-is leaves the dogfood evidence failing the checker it is meant to satisfy.

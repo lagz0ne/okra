@@ -1,0 +1,52 @@
+{
+  "id": "okra-default-dogfood",
+  "description": "A blindbox case where project instructions, not the user prompt, should cause the agent to use the OKRA skill by default.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "okra-default-dogfood",
+  "inject_skill_context": false,
+  "honor_project_rules": true,
+  "prompt": "Inspect this repository and create tasks/okra-default-dogfood.md as the plan for making completed-run memory useful after agent resets. Follow this repository's project instructions and conventions for non-trivial planning work. The task artifact must be a full operating-loop plan, not only an implementation note. Treat previous-run signals as candidate inputs only. Also create a run-scoped store at .okra/runs/default-dogfood-memory. Use any repository-provided store helper if the project instructions make one available. Persist a frame and tree, ledger objective and anti-goal reads including single_llm_truth_acceptance_count == 0, at least one discovery worker progress report, a steering/acceptance check-in, generated status, terminal/run-terminal.v1.json, memory/completed-run-consolidation.v1.json, memory/continuation-packet.v1.json, and memory/trace-manifest.v1.jsonl. Retain referenced source bytes under .okra/content/sha256. The terminal record must not predate the append-only evidence it cites. The trace manifest must include content_hash or sha256 plus excerpt_hash for retained traces and a causal decision path. Include a structured review_set with reviewer kind, tool/model, prompt hash, source/content hash, verdict, objections or dissent, confidence, independence basis, conflict status, artifact path, and artifact hash; if real second-opinion evidence is unavailable, keep memory promotion candidate-only and record the review gap as blocked/pending rather than accepting a single model report. Do not implement product code or create anything outside .okra/ and the requested task artifact.",
+  "allowed_paths": [
+    ".okra/",
+    "tasks/okra-default-dogfood.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/okra-default-dogfood.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "tasks/okra-default-dogfood.md",
+      "contains": [
+        "memory_progression_design_confidence",
+        "single_llm_truth_acceptance_count",
+        "run-terminal.v1.json",
+        "completed-run-consolidation.v1.json",
+        "continuation-packet.v1.json",
+        "trace-manifest.v1.jsonl",
+        "review_set"
+      ]
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/okra-default-dogfood.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/okra-default-dogfood.md"
+    },
+    {
+      "type": "okra_learning_memory",
+      "path": "tasks/okra-default-dogfood.md"
+    },
+    {
+      "type": "okra_terminal_memory",
+      "path": "tasks/okra-default-dogfood.md"
+    },
+    {
+      "type": "okra_terminal_run_store",
+      "path": ".okra/runs/default-dogfood-memory"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "type": "worker_progress",
+  "worker_kind": "dkr",
+  "worker_id": "dkr-memory-cycle",
+  "steering_decision": "Require a completed-run terminalization cycle before cross-run memory reuse.",
+  "risk_or_anti_goal_uncertainty": "Without trace manifests, continuation packets, and second-opinion evidence, a future reset can reuse stale or one-model learning as authority.",
+  "learning_collected": [
+    "Default dogfooding must be tested by project rules rather than prompt injection.",
+    "Completed-run details can be shed only after retained traces explain each accepted learning.",
+    "Judgement-heavy memory promotion needs human ratification or at least two independent review artifacts.",
+    "The review wrapper can fail mechanically, so terminal records must preserve that blocker instead of laundering it into success."
+  ],
+  "probability_update": {
+    "memory_progression_design_confidence_before": 0.55,
+    "memory_progression_design_confidence_after": 0.86
+  },
+  "candidate_ckrs": [
+    "ckr.default_dogfood_surface",
+    "ckr.memory_terminalization_surface",
+    "ckr.eval_alignment_surface"
+  ],
+  "next_unknowns": [
+    "Whether real scored Codex and Claude runs satisfy the new default-dogfood case.",
+    "Whether the next completed run should compact or preserve raw rollout excerpts by sensitivity class."
+  ],
+  "next_report_at": "2026-06-29T07:35:20Z"
+}

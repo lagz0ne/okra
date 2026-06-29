@@ -1,0 +1,52 @@
+{
+  "type": "review_remediation_checkin",
+  "round": 2,
+  "reviewer": "multi_agent:Lagrange",
+  "review_status": "blocking_findings_remediated",
+  "findings": [
+    {
+      "issue": "Claude default dogfood lacked a Claude-readable project-rule file when injected skill context was disabled.",
+      "fix": "Added evals/blindbox/fixtures/okra-default-dogfood/CLAUDE.md and verified the prepared Claude workspace contains it."
+    },
+    {
+      "issue": "auto_authority could ignore a real violation when an unrelated previous sentence contained negation.",
+      "fix": "Limited negation suppression to the same authority sentence and added unrelated-negation-auto-authority golden plus probe."
+    },
+    {
+      "issue": "required terminal artifact filenames could be mentioned in negated prose and still count.",
+      "fix": "Changed terminal artifact matching to require committed artifact context and added negated-terminal golden plus probe."
+    },
+    {
+      "issue": "review_set and value-verification gates were too weak.",
+      "fix": "Required full structured review fields and all four value methods: reset replay, counterfactual eval, scored blindbox eval, and repeated-mistake metric."
+    }
+  ],
+  "evidence": [
+    {
+      "kind": "deterministic_command",
+      "command": "python3 evals/blindbox/checks/okra_terminal_memory.py --calibrate evals/blindbox/golden/okra-terminal-memory",
+      "result": "exit 0; 1 pass, 8 fail"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/validate-skills.sh",
+      "result": "exit 0; includes expanded okra terminal-memory calibration"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both --case okra-default-dogfood",
+      "result": "exit 0; prepared workspaces include AGENTS.md for Codex and CLAUDE.md for Claude"
+    },
+    {
+      "kind": "deterministic_command",
+      "command": "scripts/run-blindbox.sh --dry-run --agent both",
+      "result": "exit 0"
+    }
+  ],
+  "single_llm_truth_acceptance_count": 0,
+  "remaining_flags": [
+    "cannot:scored-eval-not-run",
+    "cannot:api-backed-review-not-run"
+  ],
+  "next_check_at": "2026-06-29T08:34:52Z"
+}

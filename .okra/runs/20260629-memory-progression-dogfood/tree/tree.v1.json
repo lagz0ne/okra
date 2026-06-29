@@ -1,0 +1,75 @@
+{
+  "ckrs": [
+    {
+      "context": "AGENTS/README/review prompts make OKRA the default workflow for non-trivial repo work",
+      "id": "ckr.default_dogfood_surface",
+      "metric_id": "default_dogfood_surface_count",
+      "target": 1
+    },
+    {
+      "context": "SKILL.md and learning-memory reference require terminal proof, trace manifest, consolidation, continuation, and review_set evidence",
+      "id": "ckr.memory_terminalization_surface",
+      "metric_id": "terminal_memory_contract_count",
+      "target": 1
+    },
+    {
+      "context": "blindbox runner can omit injected skill context and honor project rules for a default-dogfood case",
+      "id": "ckr.eval_alignment_surface",
+      "metric_id": "default_dogfood_blindbox_case_count",
+      "target": 1
+    }
+  ],
+  "dkrs": [
+    {
+      "budget": "one implementation turn",
+      "confidence_output": "memory_progression_design_confidence",
+      "decision_target": "which full-cycle completed-run memory records should become required before reuse",
+      "id": "dkr.completed_run_memory_cycle",
+      "risk_or_anti_goal_uncertainty": "trace loss, stale learning reuse, and single-LLM truth acceptance",
+      "worker_scope": "discovery"
+    }
+  ],
+  "frame_version": "frame.v1",
+  "orchestrator": {
+    "id": "okra-memory-progression-orchestrator",
+    "owns": [
+      "objective checks",
+      "check-ins",
+      "OKR board",
+      "subagent steering",
+      "anti-goal admissibility"
+    ],
+    "stop_rule": "continue until the objective metric reaches target or a human/blocking flag stops the loop"
+  },
+  "pkrs": [
+    {
+      "id": "pkr.docs_default_dogfood",
+      "progress_signals": [
+        "AGENTS.md default workflow present",
+        "README eval snippet present",
+        "review prompt updated"
+      ],
+      "worker_scope": "progression"
+    },
+    {
+      "id": "pkr.memory_cycle_docs",
+      "progress_signals": [
+        "learning-memory full cycle present",
+        "terminalization added to SKILL.md",
+        "review_set contract present"
+      ],
+      "worker_scope": "progression"
+    },
+    {
+      "id": "pkr.default_dogfood_eval",
+      "progress_signals": [
+        "runner supports inject_skill_context=false",
+        "runner supports honor_project_rules=true",
+        "okra-default-dogfood case and fixture added"
+      ],
+      "worker_scope": "progression"
+    }
+  ],
+  "tree_hash": "8889e152d645c9062872502bc00f86daf493fa50afdb3a2b64565f5f6adfaaf2",
+  "tree_version": "tree.v1"
+}

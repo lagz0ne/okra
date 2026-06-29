@@ -1,0 +1,46 @@
+{
+  "run_id": "20260629-memory-progression-dogfood",
+  "consolidated_at": "2026-06-29T07:25:20Z",
+  "accepted_learning_checkpoints": [
+    {
+      "learning": "Default dogfooding must be project-loadable and eval-tested without explicit prompt skill injection.",
+      "evidence": [
+        "AGENTS.md default workflow",
+        "scripts/okr-runner.py inject_skill_context/honor_project_rules",
+        "evals/blindbox/cases/okra-default-dogfood.json"
+      ],
+      "confidence": 0.86,
+      "ratification_status": "candidate_for_future_runs_until_human_accepts_as_policy_memory"
+    },
+    {
+      "learning": "Completed-run memory needs terminal proof, retained traces, consolidation output, continuation packet, and review_set evidence before reuse.",
+      "evidence": [
+        "skills/reverse-tornado-okr/SKILL.md Step 2e",
+        "skills/reverse-tornado-okr/references/learning-memory.md Full Memory Cycle"
+      ],
+      "confidence": 0.88,
+      "ratification_status": "candidate_for_future_runs_until_human_accepts_as_policy_memory"
+    }
+  ],
+  "retained_traces": [
+    ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl"
+  ],
+  "deferred_or_rejected": [
+    {
+      "item": "Claim API-backed Codex/Claude review passed",
+      "status": "rejected",
+      "reason": "review wrapper exited 1 with tool/API failures"
+    },
+    {
+      "item": "Promote prior-run signals as authority",
+      "status": "deferred",
+      "reason": "previous-run signals remain candidate inputs pending current evidence and human ratification"
+    }
+  ],
+  "next_run_candidate_anti_goals": [
+    "single_llm_truth_acceptance_count == 0",
+    "unratified_memory_promotion_count == 0",
+    "stale_learning_reuse_count == 0",
+    "trace_loss_reuse_count == 0"
+  ]
+}

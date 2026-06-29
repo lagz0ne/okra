@@ -1,0 +1,58 @@
+{
+  "action_envelope": {
+    "allowed_moves": [
+      "add deterministic checker",
+      "add golden pass/fail fixtures",
+      "wire runner validation and result hashing",
+      "extend default-dogfood eval fixture",
+      "run local deterministic validation"
+    ],
+    "approval_gates": [
+      "human owns whether the compact memory skill becomes policy memory"
+    ],
+    "forbidden_moves": [
+      "claim scored evals ran when only dry-run dispatch ran",
+      "claim API-backed review passed if it did not run",
+      "weaken existing learning-memory gates to make the new checker pass"
+    ]
+  },
+  "anti_goals": [
+    {
+      "definition": "Do not accept the verifier as valuable from one model narrative alone.",
+      "metric_id": "single_llm_truth_acceptance_count",
+      "target": 0,
+      "type": "tripwire"
+    },
+    {
+      "definition": "Do not let vocabulary-only artifacts pass without terminal proof, retained trace, evidence gate, and value verification.",
+      "metric_id": "terminal_memory_false_confidence_count",
+      "target": 0,
+      "type": "tripwire"
+    }
+  ],
+  "frame_hash": "0e8295a49f84e0c41d71907e5065f800a6e07487eebaa38be43852034490f8a1",
+  "frame_version": "frame.v1",
+  "human_approval": {
+    "ratification_status": "ratified_by_resume_after_value_verification_discussion",
+    "ratified_at": "2026-06-29T08:14:52Z",
+    "source": "user asked to resume after asking how the compact skill value could be verified"
+  },
+  "metric_contracts": {
+    "single_llm_truth_acceptance_count": {
+      "freshness_rule": "must be read before final claim",
+      "max_age": "current turn",
+      "source": "deterministic commands plus independent reviewer result when available"
+    },
+    "terminal_memory_checker_calibrated": {
+      "freshness_rule": "fresh only when calibration and validation were run after the latest checker/case edits",
+      "max_age": "current turn",
+      "source": "checker calibration plus scripts/validate-skills.sh"
+    }
+  },
+  "objective": {
+    "definition": "The compact terminalized continuation memory skill has a deterministic checker, calibrated goldens, runner wiring, and dogfood case coverage.",
+    "metric_id": "terminal_memory_checker_calibrated",
+    "target": 1,
+    "unit": "calibrated_checker"
+  }
+}

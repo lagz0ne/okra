@@ -1,0 +1,36 @@
+{
+  "type": "retained_trace_content_evidence",
+  "single_llm_truth_acceptance_count": 0,
+  "retained_content": [
+    {
+      "label": "run-terminal.v1.json",
+      "path": ".okra/runs/20260629-memory-progression-dogfood/terminal/run-terminal.v1.json",
+      "content_sha256": "301b982be95293b33ac999662ba06566fdd947b282084256b0d25d93c74cd226"
+    },
+    {
+      "label": "completed-run-consolidation.v1.json",
+      "path": ".okra/runs/20260629-memory-progression-dogfood/memory/completed-run-consolidation.v1.json",
+      "content_sha256": "bc5d536068d089caec6145bb84e16fa52fc3238bee3473b62130afc71e8b0aef"
+    },
+    {
+      "label": "continuation-packet.v1.json",
+      "path": ".okra/runs/20260629-memory-progression-dogfood/memory/continuation-packet.v1.json",
+      "content_sha256": "b8533375d30f56a03174c02ea735200c5f513cbec188d016070fc3b239ebe0a3"
+    },
+    {
+      "label": "trace-manifest.v1.jsonl",
+      "path": ".okra/runs/20260629-memory-progression-dogfood/memory/trace-manifest.v1.jsonl",
+      "content_sha256": "bece7ca1fcce87949d9e2ac31bc3e6ca7dca9224788fa5f3d8c4ea2ea0ce92dd"
+    },
+    {
+      "label": "blocked Codex review log",
+      "path": ".runs/review/20260629T071659Z-diff/codex.log",
+      "content_sha256": "8e3330eeb312ddb37b9da73c3ece4a8aa7e2ade4b7bb255573aa487bc89f0f58"
+    },
+    {
+      "label": "blocked Claude review output",
+      "path": ".runs/review/20260629T071659Z-diff/claude.md",
+      "content_sha256": "51e01666bcabad532aecb585dfa882d4d38467c26fc3778f2654e8140429d09b"
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 .runs/
+.okra/**/*.lock
+.okra/*.jsonl
 __pycache__/
 *.pyc
 *.log
