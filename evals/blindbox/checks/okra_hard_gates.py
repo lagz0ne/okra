@@ -105,6 +105,7 @@ def is_describing_forbidden_pattern(text: str, start: int, end: int) -> bool:
         r"do not accept|hard gates?|explicitly rejected|rejected by this loop|"
         r"candidate harms?|coverage review|selected guardrails?|reject when|reject artifacts?|reject any|"
         r"anti-goal screen|anti-goal screens|veto moves?|vetoed|veto any|"
+        r"conflation|conflated|prevent conflation|prevents? [^.\n]{0,80}conflation|"
         r"forbidden without|requires? [^.\\n]{0,80}approval|human-only decisions?|"
         r"opens? when|flag definitions?|flag lifecycle|authority[_ -]?drift|"
         r"common mistakes?|mistakes? this loop avoids|mistakes? to avoid|"
@@ -158,7 +159,7 @@ def gather_stats(text: str) -> Stats:
             text,
         ),
         has_dkr_budget=has(r"\b(budget|turns?|hours?|days?|max[_ -]?age|stopping rule|stop rule|stop when|timebox)\b", text),
-        has_probability=has(r"\b(probability|probabilities|confidence|likelihood|odds|expected value|P\s*\(|\d{1,3}\s*%)\b", text),
+        has_probability=has(r"\b(probability_confidence_update|probability_confidence|confidence[_ -]?update|probability[_ -]?update|probability|probabilities|confidence|likelihood|odds|expected value|P\s*\(|\d{1,3}\s*%)\b", text),
         has_direct_metric=has(
             r"\b(direct metric|direct read|metric read|source of truth|observed_at|recorded_at|ledger|"
             r"no-cascade|waiting_for_measurement|waiting for measurement|lag window)\b",
@@ -239,6 +240,7 @@ def gather_stats(text: str) -> Stats:
             r"[\s\S]{0,1200}"
             r"(objective (?:metric|target) (?:is )?(?:achieved|reached|met)|until the objective|"
             r"objective metric reaches target|until [^.\n]{0,120}metric reaches|"
+            r"objective metric [^.\n]{0,120} reaches target|"
             r"until [^.\n]{0,160}(?:>=|<=|==)\s*\d|"
             r"metric reaches (?:target|\d)|not stop|does not stop|"
             r"keeps? (?:checking|steering|looping|running))",
@@ -260,6 +262,16 @@ def gather_stats(text: str) -> Stats:
         )
         or has(
             r"\bCKRs?\b[\s\S]{0,900}\b(not\s+(?:a\s+)?(?:subagent|worker|task|work)|not\s+dispatched|not\s+executable)\b"
+            r"[\s\S]{0,900}\b(context|measurement|metric|measurable contribution)\b",
+            text,
+        )
+        or has(
+            r"\b(?:A CKR|Each CKR|CKR)\b[\s\S]{0,900}\b(context|measurement|metric|measurable contribution)\b"
+            r"[\s\S]{0,900}\b(never\s+dispatched|not\s+(?:a\s+)?(?:subagent|worker|task|work|job)|not\s+dispatched|not\s+executable|no CKR worker)\b",
+            text,
+        )
+        or has(
+            r"\b(?:A CKR|Each CKR|CKR)\b[\s\S]{0,900}\b(never\s+dispatched|not\s+(?:a\s+)?(?:subagent|worker|task|work|job)|not\s+dispatched|not\s+executable|no CKR worker)\b"
             r"[\s\S]{0,900}\b(context|measurement|metric|measurable contribution)\b",
             text,
         ),

@@ -1,0 +1,41 @@
+{
+  "id": "okra-handoff-contracts",
+  "description": "A blindbox case where an agent must make OKRA handoff prompt packets, CKR-to-PKR traceability, and accumulated anti-goal reuse explicit.",
+  "skill": "reverse-tornado-okr",
+  "fixture": "okra-handoff-contracts",
+  "verify_contract": "handoff-contract.v1.json",
+  "prompt": "Use the available Reverse Tornado OKR skill to inspect this repository and create tasks/okra-handoff-contracts.md. Treat this as a delegated OKRA loop design for making transition surfaces contract-shaped instead of prose-shaped. The objective is `handoff_contract_acceptance_rate >= 0.90` across scored OKRA runs. Define a worker prompt packet contract for every next DKR or PKR prompt. Use a section titled Worker prompt packet contract and include these exact packet keys or dotted field names: `frame.objective`, `frame.anti_goals`, `frame.action_envelope`, `frame.human_ratification_boundary`, `current_state`, `previous_dkr_checkpoint`, `assignment`, `budget_and_stop_rule`, `hand_back_rule`, and `output_schema`. Define the in-progress influence rule in its own section and include this exact sentence: `In-progress worker narrative is not evidence; only worker progress, check-ins, metric reads, flags, or accepted checkpoints can influence the next dispatch.` Show the handoff between a previous DKR and next DKR in a DKR-to-DKR handoff section with these exact fields: `previous_dkr_checkpoint`, `decision_target`, `evidence_refs_or_hashes`, `questions_answered`, `questions_unanswered`, `confidence_probability_update`, `risk_or_anti_goal_implications`, `orchestrator_decision`, and `next_dkr_scope`; the next DKR scope must be derived from that evidence. In that section do not stop at a field-definition table: write one concrete worked instantiation in prose that names the previous DKR learning checkpoint and its accepted or held checkpoint status, states the decision target as a steering decision (whether to promote, fund, dry-run, veto, pause, re-aim, or escalate), gives a confidence/probability update showing the value before and after (prior -> posterior), and records the orchestrator decision as accepted, held, or rejected. Define CKR value toward PKR: CKR is measurable contribution context, not worker work, and every PKR must carry linked_ckr, source_dkr_checkpoint, contribution_metric, done check, progress signals, and a hand-back rule when new uncertainty appears. Include a PKR discovery hand-back line saying PKRs hand back on unknown discovery instead of researching or resolving unknowns inside execution. Define accumulated long-time anti-goals as a candidate guardrail library, such as candidate-anti-goals.v1.json, with metric_id, threshold, type, applies_when, does_not_apply_when, invalidates_when or recertify_by, source refs, trace evidence, candidate_status, no_regression_evidence, and human ratification boundary. Explicitly state that previous-run anti-goals are automatic inputs, not automatic authority, and that `unratified_memory_promotion_count == 0`, `single_llm_truth_acceptance_count == 0`, and `eval_regression_count == 0` must hold. Include DKR-first reasoning, candidate promotion gates, no-cascade direct metric reads, all four flags shown operationally (each flag is `open`, `acknowledged`, `resolved`, or `waived`, with an owner and a blocking status, and `breaking` pauses committing moves), PKR progress signals, and this exact orchestrator ownership sentence before any variants: `The orchestrator owns objective checks, check-ins, the OKR board, and subagent steering until the objective metric reaches target.` Then instantiate that target as `handoff_contract_acceptance_rate >= 0.90`. Include an Operating Loop section with a line that starts `Heartbeat cadence and next_check_at:` naming a time-based ten-minute heartbeat together with the next scheduled check `next_check_at`, and note that long-running workers write file-based progress reports under `.okra/workers/`. Before you finish, run the OKRA public completeness gate on your artifact and fix every gap it reports, then re-run it until it prints `OKRA artifact complete` (at most 5 iterations): `python3 .claude/skills/reverse-tornado-okr/scripts/okra-verify-artifact.py tasks/okra-handoff-contracts.md`. This read-only completeness check is part of the OKRA procedure and is allowed; it does not create anything outside the task file. If gaps remain after 5 iterations, add a short `Known gaps` note listing them instead of looping further. Write every required field and rule affirmatively: never state that a required field (any worker-packet key, any PKR trace field such as linked_ckr/source_dkr_checkpoint/contribution_metric/done check/progress signals/hand-back, or any candidate anti-goal field) is optional, conditional, may be omitted, or need not be included; never leave a required field empty or as none/n/a/tbd; fill every DKR-to-DKR handoff field and the risk_or_anti_goal_implications with concrete content; keep CKR as context (never worker work) and keep the in-progress rule stating narrative is not evidence. Do not implement product code or create anything outside tasks/okra-handoff-contracts.md.",
+  "allowed_paths": [
+    "tasks/okra-handoff-contracts.md"
+  ],
+  "checks": [
+    {
+      "type": "file_exists",
+      "path": "tasks/okra-handoff-contracts.md"
+    },
+    {
+      "type": "file_contains",
+      "path": "tasks/okra-handoff-contracts.md",
+      "contains": [
+        "handoff_contract_acceptance_rate",
+        "linked_ckr",
+        "source_dkr_checkpoint",
+        "contribution_metric",
+        "candidate-anti-goals.v1.json",
+        "unratified_memory_promotion_count"
+      ]
+    },
+    {
+      "type": "reverse_tornado_loop",
+      "path": "tasks/okra-handoff-contracts.md"
+    },
+    {
+      "type": "okra_hard_gates",
+      "path": "tasks/okra-handoff-contracts.md"
+    },
+    {
+      "type": "okra_handoff_contracts",
+      "path": "tasks/okra-handoff-contracts.md"
+    }
+  ]
+}

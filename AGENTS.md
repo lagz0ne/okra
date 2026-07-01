@@ -80,6 +80,24 @@ CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-checkin-steering
 ```
 
+Run the Claude model matrix when validating Claude behavior across the current Opus and Sonnet
+targets. The default matrix is `claude-opus-4-8` plus `claude-sonnet-5`; override with
+`ANTHROPIC_MODEL_MATRIX` only when the current model policy changes:
+
+```sh
+scripts/run-claude-model-matrix.sh --case okra-handoff-contracts
+```
+
+The matrix wrapper reruns current deterministic checkers over each preserved workspace after a
+scored run and writes `recheck.json` beside `result.json`. Recheck also validates the preserved
+`result.sha256`, prompt/input hashes, workspace output hashes, changed-path allowlist, and
+credential/runtime cleanup checks. When checker code changes or a release verdict needs a no-model
+refresh, use:
+
+```sh
+scripts/run-claude-model-matrix.sh --recheck-latest --case okra-handoff-contracts
+```
+
 The runner copies a fixture into `.runs/blindbox/<run>/workspace`, injects the skill into project-local Claude/Codex skill folders, then executes the selected agent through `bwrap`. The sandbox exposes the eval workspace plus `.runs/blindbox/<run>/runtime/` as writable during execution; runtime contains the per-run agent home, cache, Codex home, and agent output scratch. Runtime scratch is scrubbed after the agent exits, and archived prompt, command, progress, final, and result packets are kept outside writable sandbox mounts. Selected system/tool paths are read-only. It does not mount this host repo into the sandbox, so eval cases and expected checks are not readable by the agent. Network remains available so agent CLIs can call their APIs.
 
 The bwrap environment is cleared before launch, then the runner sets only the per-run HOME, cache,

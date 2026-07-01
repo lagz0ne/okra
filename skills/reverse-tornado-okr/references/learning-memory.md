@@ -111,6 +111,14 @@ candidate anti-goals with metrics, suggested DKR probes with budgets and steerin
 context-fit notes, freshness/recertification deadlines, and evidence hashes. It must not rewrite the
 current frame or promote guardrails without current-run evidence and human ratification.
 
+`candidate-anti-goals.v1.json` is the accumulated guardrail library for a context. It should include
+only reusable candidate anti-goals, not active frame defaults. Each entry should include `metric_id`,
+threshold, type (`drift` or `tripwire`), `source_run_id`, `source_refs`, `trace_manifest_ref`,
+`applies_when`, `does_not_apply_when`, `invalidates_when`, `valid_until` or `recertify_by`,
+confidence, `candidate_status`, `no_regression_evidence`, review-set refs when needed, and
+ratification status. A future run may load this file as input, but promotion still requires
+current-context evidence and human ratification for any frame or guardrail change.
+
 `trace-manifest.v1.jsonl` is the retention proof. Each line should include source log path, sequence
 or line range, content hash, excerpt hash, causal decision path, sensitivity, redaction status,
 retention tier, expiry or tombstone, and the memory records that depend on it. If a memory item loses

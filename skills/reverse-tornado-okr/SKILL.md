@@ -137,6 +137,14 @@ Workers must report progress in a durable place. For long runs, use an explicit 
 unknown is hit, and on a timed heartbeat. Ten minutes is a good default heartbeat for live subagent
 work unless the human sets a different cadence.
 
+Every worker dispatch should be a **worker prompt packet**, not a raw continuation of the previous
+worker's chat. The packet includes the read-only frame, current state, previous DKR checkpoint refs
+when relevant, the exact assignment, budget and stop rule, hand-back rule, allowed and forbidden
+actions, and output schema. In-progress work may influence the next prompt only through governed
+records: worker progress files, check-ins, metric reads, flags, move results, accepted DKR
+checkpoints, and stored evidence refs. A freeform worker narrative or model self-report can point to
+evidence, but is not evidence.
+
 The authority gradient, made concrete:
 `human owns the frame -> orchestrator works inside it and makes the loop's calls -> workers execute
 inside their scope and hand back at their edge.`
@@ -246,6 +254,13 @@ cross-run learning seeds the next loop's candidate frame, anti-goals, DKR probes
 envelope. Previous-run memories are automatic inputs, not automatic authority: load them when
 available, but keep them candidate-only until the current run has evidence and the human ratifies
 any frame or guardrail change.
+
+Accumulated anti-goals should be represented as a candidate guardrail library, such as
+`candidate-anti-goals.v1.json`, not as hidden defaults. Each candidate anti-goal needs a metric,
+threshold, type, context fit, invalidation or recertification rule, source refs or hashes,
+candidate status, trace evidence, no-regression evidence, and ratification status. At run start the
+orchestrator may propose relevant entries as candidate frame inputs, DKR probes, PKR progress
+signals, or action-envelope concerns; it must not silently promote them into the active frame.
 
 A completed run must be **terminalized** before its learning is reused. Record the terminal state,
 objective and anti-goal metric refs, unresolved flags, accepted DKR checkpoints, retained trace
@@ -402,7 +417,9 @@ For delegated loops, make these four lines explicit in the artifact:
   not subagent work. For each CKR, include one compact line that starts
   **"CKR-level discovery/delivery balance:"** and names both the discovery side and the delivery
   path.
-- PKRs are progression-worker execution units and must report progress signals at check-ins.
+- PKRs are progression-worker execution units and must report progress signals at check-ins. Each
+  PKR should carry `linked_ckr`, `source_dkr_checkpoint`, `contribution_metric`, done check, allowed
+  actions, forbidden actions, and the hand-back rule for newly discovered uncertainty.
 - Long-running workers write file-based progress reports under `.okra/runs/<run-id>/workers/` and
   use a timed heartbeat, defaulting to ten minutes when the human has not set a cadence. Include one
   compact line that starts **"Heartbeat cadence and next_check_at:"** and contains both the cadence
@@ -411,6 +428,20 @@ For delegated loops, make these four lines explicit in the artifact:
   allocation, expected/direct metric or risk effect, and a freshness or evidence reference. Also
   append a steering-value ledger metric read, such as `steering_value_score >= 0.75` or
   `valuable_steering_decision_count >= 1`; do not leave steering value only in prose.
+
+For delegated handoff, learning-cycle, or transition-surface artifacts, make the contract surface
+field-explicit instead of relying on prose. Include a **Worker prompt packet contract** with these
+exact keys or dotted field names in the packet: `frame.objective`, `frame.anti_goals`,
+`frame.action_envelope`, `frame.human_ratification_boundary`, `current_state`,
+`previous_dkr_checkpoint`, `assignment`, `budget_and_stop_rule`, `hand_back_rule`, and
+`output_schema`. Include an **In-progress influence rule** with this exact sentence:
+**"In-progress worker narrative is not evidence; only worker progress, check-ins, metric reads,
+flags, or accepted checkpoints can influence the next dispatch."** Include a **DKR-to-DKR handoff**
+section that names `previous_dkr_checkpoint`, `decision_target`, `evidence_refs_or_hashes`,
+`questions_answered`, `questions_unanswered`, `confidence_probability_update`,
+`risk_or_anti_goal_implications`, `orchestrator_decision`, and `next_dkr_scope`. Include a
+**PKR discovery hand-back** line saying that PKRs hand back on unknown discovery instead of
+researching or resolving unknowns inside execution.
 
 For delegated loops, include a compact **Eval Points** section with these exact labels instantiated
 for the current goal:
@@ -453,6 +484,11 @@ single file, no external runtime, no decoration that does not carry meaning).
   decision it unlocks and the risk or anti-goal uncertainty it reduces.
 - Promoting CKRs or PKRs before a DKR learning checkpoint has produced evidence, probabilities, and
   decision-ready risk implications.
+- Sending a raw "continue from previous work" prompt instead of a worker prompt packet with frame,
+  current state, checkpoint refs, assignment, budget, stop rule, hand-back rule, and output schema.
+- Letting in-progress worker narrative influence the next dispatch without governed records such as
+  progress files, check-ins, metric reads, flags, accepted checkpoints, or evidence hashes.
+- Dispatching a PKR without `linked_ckr`, `source_dkr_checkpoint`, and `contribution_metric`.
 - Omitting the `pointless` flag, or defining it without saying the objective metric stays flat or
   does not move after the lag window.
 - Letting the loop redefine, retune, or switch the goal. That is always the human's call.

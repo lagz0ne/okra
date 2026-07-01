@@ -95,6 +95,24 @@ CODEX_MODEL=<codex-model> ANTHROPIC_MODEL=<claude-model> \
 scripts/run-blindbox.sh --agent both --case okra-default-dogfood
 ```
 
+To compare Claude model behavior across the current Opus and Sonnet verification set, run the
+Claude-only model matrix. The default matrix is `claude-opus-4-8` and `claude-sonnet-5`; override it
+with `ANTHROPIC_MODEL_MATRIX` when needed.
+
+```sh
+scripts/run-claude-model-matrix.sh --case okra-handoff-contracts
+```
+
+After each scored model run, the matrix wrapper reruns the current deterministic checkers over the
+preserved workspace and writes `recheck.json` next to `result.json`. Recheck also validates the
+preserved `result.sha256`, prompt/input hashes, workspace output hashes, changed-path allowlist, and
+credential/runtime cleanup checks. To validate the latest preserved Opus/Sonnet artifacts without
+spending model calls, run:
+
+```sh
+scripts/run-claude-model-matrix.sh --recheck-latest --case okra-handoff-contracts
+```
+
 The runner copies a fixture into `.runs/`, injects the skill into a disposable workspace, launches
 the selected agent through `bwrap`, and preserves prompts, logs, outputs, hashes, and check results.
 Writable agent scratch lives under each run's `runtime/` directory, is checked for post-run cleanup,

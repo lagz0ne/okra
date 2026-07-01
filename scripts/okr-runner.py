@@ -35,6 +35,18 @@ DEFAULT_HEARTBEAT_SECONDS = 30
 MAX_SECRET_SCAN_BYTES = 5 * 1024 * 1024
 MAX_DIFF_CONTEXT_FILE_BYTES = 512 * 1024
 RUNTIME_DIR_NAME = "runtime"
+CHECKER_SCRIPTS = {
+    "reverse_tornado_loop": "reverse_tornado_loop.py",
+    "okra_hard_gates": "okra_hard_gates.py",
+    "okra_store_governance": "okra_store_governance.py",
+    "okra_checkin_steering": "okra_checkin_steering.py",
+    "okra_learning_memory": "okra_learning_memory.py",
+    "okra_handoff_contracts": "okra_handoff_contracts.py",
+    "okra_terminal_memory": "okra_terminal_memory.py",
+    "okra_terminal_run_store": "okra_terminal_run_store.py",
+    "operations_stale_metrics": "operations_stale_metrics.py",
+}
+BUILTIN_CHECK_TYPES = {"file_exists", "file_contains"}
 QUICK_VALIDATE = (
     Path.home()
     / ".codex"
@@ -492,18 +504,7 @@ def load_cases(selected: list[str] | None) -> list[dict[str, Any]]:
 
 def validate_cases() -> list[str]:
     errors: list[str] = []
-    allowed_checks = {
-        "file_exists",
-        "file_contains",
-        "reverse_tornado_loop",
-        "okra_hard_gates",
-        "okra_store_governance",
-        "okra_checkin_steering",
-        "okra_learning_memory",
-        "okra_terminal_memory",
-        "okra_terminal_run_store",
-        "operations_stale_metrics",
-    }
+    allowed_checks = BUILTIN_CHECK_TYPES | set(CHECKER_SCRIPTS)
     for case in load_cases(None):
         path = case["_path"]
         for key in ("id", "description", "skill", "fixture", "prompt", "checks"):
@@ -764,14 +765,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         )
 
     calibrated_checkers = [
-        ("reverse_tornado_loop.py", "reverse-tornado-loop"),
-        ("okra_hard_gates.py", "okra-hard-gates"),
-        ("operations_stale_metrics.py", "operations-stale-metrics"),
-        ("okra_store_governance.py", "okra-store-governance"),
-        ("okra_checkin_steering.py", "okra-checkin-steering"),
-        ("okra_learning_memory.py", "okra-learning-memory"),
-        ("okra_terminal_memory.py", "okra-terminal-memory"),
-        ("okra_terminal_run_store.py", "okra-terminal-run-store"),
+        (script_name, check_type.replace("_", "-"))
+        for check_type, script_name in sorted(CHECKER_SCRIPTS.items())
     ]
     for checker_name, golden_name in calibrated_checkers:
         checker = CHECKERS_DIR / checker_name
@@ -795,6 +790,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
     )
     failures += run_checked(
         ["bash", "-n", str(skill_path() / "scripts" / "okra-store.sh")],
+        dry_run=args.dry_run,
+    )
+    failures += run_checked(
+        ["bash", "-n", str(REPO_ROOT / "scripts" / "run-claude-model-matrix.sh")],
         dry_run=args.dry_run,
     )
     failures += validate_store_helper_behavior(dry_run=args.dry_run)
@@ -1153,6 +1152,100 @@ def build_case_prompt(case: dict[str, Any], workspace_root: str) -> str:
     )
 
 
+def run_verify_gate(case: dict[str, Any], workspace: Path) -> dict[str, Any] | None:
+    """Run the skill's PUBLIC completeness gate on the produced artifact.
+
+    Uses the public contract shipped with the skill (contracts/<name>.v1.json) and the
+    okra-verify-artifact.py helper. This is the product's own definition-of-done, not the
+    hidden eval rubric. Returns the JSON report, or None when the case opts out.
+    """
+    contract_name = case.get("verify_contract")
+    if not contract_name:
+        return None
+    skill = skill_path(case["skill"])
+    contract = skill / "contracts" / contract_name
+    verifier = skill / "scripts" / "okra-verify-artifact.py"
+    allowed = case.get("allowed_paths") or []
+    if not allowed:
+        return {"complete": None, "error": "no allowed_paths to verify"}
+    artifact = workspace / allowed[0]
+    if not (contract.exists() and verifier.exists() and artifact.exists()):
+        return {"complete": None, "error": "verify gate assets missing"}
+    proc = subprocess.run(
+        [sys.executable, str(verifier), str(artifact), "--contract", str(contract), "--json"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    try:
+        return json.loads(proc.stdout)
+    except Exception:
+        return {"complete": None, "error": (proc.stdout + proc.stderr)[:500]}
+
+
+def build_repair_prompt(case: dict[str, Any], workspace_root: str, gaps: str) -> str:
+    artifact = (case.get("allowed_paths") or ["the task file"])[0]
+    return (
+        f"The file {artifact} you wrote does not yet satisfy the OKRA public completeness contract "
+        f"for a {case['id']} artifact. It is missing the documented, required sections listed below. "
+        f"Edit {artifact} to add each one; keep all existing correct content and do not delete sections.\n\n"
+        f"Missing (from the skill's own published contract, not any hidden rubric):\n{gaps}\n\n"
+        f"Work only inside {workspace_root}. Do not inspect eval case definitions or expected checks. "
+        f"After editing, stop.\n"
+    )
+
+
+def load_coherence_review(case: dict[str, Any]) -> list[str]:
+    contract_name = case.get("verify_contract")
+    if not contract_name:
+        return []
+    contract = skill_path(case["skill"]) / "contracts" / contract_name
+    if not contract.exists():
+        return []
+    try:
+        data = json.loads(contract.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    rules = data.get("coherence_review") or []
+    return [r for r in rules if isinstance(r, str)]
+
+
+def build_coherence_detect_prompt(case: dict[str, Any], workspace_root: str, rules: list[str]) -> str:
+    artifact = (case.get("allowed_paths") or ["the task file"])[0]
+    checklist = "\n".join(f"{i}. {r}" for i, r in enumerate(rules, 1))
+    return (
+        f"READ-ONLY REVIEW. Do NOT modify {artifact} or any file. You are auditing {artifact} against "
+        f"each OKRA public coherence rule below (each restates a documented rule from the skill, not any "
+        f"hidden rubric). Be STRICT and adversarial: your job is to FIND violations, not to reassure.\n\n"
+        f"Coherence rules:\n{checklist}\n\n"
+        f"For EACH rule, do this in your reply:\n"
+        f"- Quote the exact sentence(s) in the artifact most relevant to that rule (search the whole file).\n"
+        f"- Then mark it PASS or VIOLATION. Mark VIOLATION whenever a required field is called optional, "
+        f"omittable, conditional, or 'need not' be carried; is left empty / none / n/a / tbd; is stated "
+        f"only in a definition table but never actually filled in with concrete content; or the rule is "
+        f"contradicted anywhere. If genuinely unsure, mark VIOLATION.\n\n"
+        f"Then end your reply with exactly one final line:\n"
+        f"COHERENCE_VIOLATIONS: NONE   (only if every rule is a clear PASS)\n"
+        f"COHERENCE_VIOLATIONS: <comma-separated rule numbers>   (every rule you marked VIOLATION)\n"
+        f"Do not edit any file. Work only inside {workspace_root}. Do not inspect eval case definitions."
+    )
+
+
+def build_coherence_prompt(case: dict[str, Any], workspace_root: str, rules: list[str], only: list[int] | None = None) -> str:
+    artifact = (case.get("allowed_paths") or ["the task file"])[0]
+    chosen = [(i, r) for i, r in enumerate(rules, 1) if not only or i in only]
+    checklist = "\n".join(f"{i}. {r}" for i, r in chosen)
+    return (
+        f"The file {artifact} violates the OKRA public coherence rules below (each restates a documented "
+        f"rule from the skill, not any hidden rubric). Make the SMALLEST edits needed to fix ONLY these "
+        f"violations -- fix any place where a required field is said to be optional/omittable, is left "
+        f"empty, or is contradicted.\n\n"
+        f"Rules to fix:\n{checklist}\n\n"
+        f"Keep all existing correct content; do not rewrite or delete compliant sections. Work only "
+        f"inside {workspace_root}. Do not inspect eval case definitions or expected checks. After editing, stop.\n"
+    )
+
+
 def bwrap_prefix(workspace: Path, run_dir: Path, agent: str | None = None) -> list[str]:
     env_path = os.environ.get("PATH", "")
     host_home = str(Path.home())
@@ -1426,6 +1519,8 @@ def git_changed_paths(workspace: Path) -> list[str]:
         stderr=subprocess.STDOUT,
         timeout=10,
     )
+    if proc.returncode:
+        raise RunnerError(f"cannot read workspace git status: {proc.stdout.strip()}")
     paths: list[str] = []
     for line in proc.stdout.splitlines():
         if len(line) < 4:
@@ -1450,7 +1545,16 @@ def evaluate_allowed_paths(
     allowed_paths: list[str],
     baseline: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    changed = snapshot_changed_paths(workspace, baseline) if baseline is not None else git_changed_paths(workspace)
+    try:
+        changed = snapshot_changed_paths(workspace, baseline) if baseline is not None else git_changed_paths(workspace)
+    except RunnerError as exc:
+        return {
+            "type": "changed_paths_allowlist",
+            "path": ",".join(allowed_paths),
+            "passed": False,
+            "detail": str(exc),
+            "changed_paths": [],
+        }
     unexpected = [path for path in changed if not is_allowed_changed_path(path, allowed_paths)]
     if unexpected:
         detail = "unexpected changes: " + ", ".join(unexpected)
@@ -1635,12 +1739,14 @@ def output_hashes(run_dir: Path, workspace: Path, baseline: dict[str, str] | Non
     if artifacts.exists():
         for path in sorted(child for child in artifacts.rglob("*") if child.is_file()):
             artifact_files[path.relative_to(run_dir).as_posix()] = sha256_path(path)
+    workspace_content_hash = sha256_path(workspace, exclude_top_level={".git"})
     return {
         # runtime/ is intentionally excluded here; runtime_scratch_cleanup emits
         # runtime_tree_sha256 when leftover scratch remains after scrub.
         "run_tree_sha256_before_result": sha256_path(run_dir, exclude_top_level={RUNTIME_DIR_NAME}),
         "artifacts_tree_sha256": sha256_path(artifacts) if artifacts.exists() else "missing",
-        "workspace_tree_sha256": sha256_path(workspace),
+        "workspace_tree_sha256": workspace_content_hash,
+        "workspace_content_sha256": workspace_content_hash,
         "changed_paths_sha256": changed_path_hashes(workspace, baseline),
         "artifact_files_sha256": artifact_files,
     }
@@ -1651,6 +1757,160 @@ def write_result(run_dir: Path, result: dict[str, Any]) -> None:
     result_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     digest = sha256_path(result_path)
     (run_dir / "result.sha256").write_text(f"{digest}  result.json\n", encoding="utf-8")
+
+
+def evaluate_sha256_sidecar(run_dir: Path, filename: str) -> dict[str, Any]:
+    path = run_dir / filename
+    sidecar = run_dir / f"{filename.rsplit('.', 1)[0]}.sha256"
+    if not path.exists():
+        return {
+            "type": "sha256_sidecar_integrity",
+            "path": filename,
+            "passed": False,
+            "detail": f"missing {filename}",
+        }
+    if not sidecar.exists():
+        return {
+            "type": "sha256_sidecar_integrity",
+            "path": str(sidecar.relative_to(run_dir)),
+            "passed": False,
+            "detail": f"missing {sidecar.name}",
+        }
+    text = sidecar.read_text(encoding="utf-8", errors="replace").strip()
+    parts = text.split()
+    expected_hash = parts[0] if parts else ""
+    expected_name = parts[-1] if len(parts) >= 2 else ""
+    actual_hash = sha256_path(path)
+    passed = expected_hash == actual_hash and expected_name == filename
+    detail = "sha256 sidecar matches" if passed else (
+        f"sha256 sidecar mismatch: expected {expected_hash or '<missing>'} {expected_name or '<missing>'}, "
+        f"actual {actual_hash} {filename}"
+    )
+    return {
+        "type": "sha256_sidecar_integrity",
+        "path": str(sidecar.relative_to(run_dir)),
+        "passed": passed,
+        "detail": detail,
+        "expected_sha256": expected_hash,
+        "actual_sha256": actual_hash,
+    }
+
+
+def expected_prompt_for_result(case: dict[str, Any], result: dict[str, Any], workspace: Path) -> str:
+    isolation = result.get("isolation")
+    workspace_root = BWRAP_WORKSPACE if isolation == "bwrap" else str(workspace)
+    return build_case_prompt(case, workspace_root)
+
+
+def evaluate_preserved_input_integrity(case: dict[str, Any], result: dict[str, Any], run_dir: Path, workspace: Path) -> dict[str, Any]:
+    input_hash = result.get("input_hashes")
+    if not isinstance(input_hash, dict):
+        return {
+            "type": "preserved_input_integrity",
+            "path": "result.json",
+            "passed": False,
+            "detail": "missing input_hashes in result.json",
+        }
+
+    prompt_path = run_dir / "artifacts" / "prompt.md"
+    mismatches: list[str] = []
+    current = {
+        "case_sha256": sha256_path(case["_path"]),
+        "fixture_sha256": sha256_path(FIXTURES_DIR / case["fixture"]),
+        "skill_sha256": sha256_path(skill_path(case["skill"])),
+        "prompt_sha256": sha256_text(expected_prompt_for_result(case, result, workspace)),
+    }
+    for key, digest in current.items():
+        if input_hash.get(key) != digest:
+            mismatches.append(f"{key}: result={input_hash.get(key, '<missing>')} current={digest}")
+
+    if prompt_path.exists():
+        prompt_artifact_hash = sha256_path(prompt_path)
+        if input_hash.get("prompt_sha256") != prompt_artifact_hash:
+            mismatches.append(
+                f"prompt_artifact_sha256: result={input_hash.get('prompt_sha256', '<missing>')} "
+                f"artifact={prompt_artifact_hash}"
+            )
+    else:
+        mismatches.append("prompt artifact missing: artifacts/prompt.md")
+
+    detail = "preserved input hashes match current case, fixture, skill, and prompt" if not mismatches else (
+        "preserved input drift: " + "; ".join(mismatches)
+    )
+    return {
+        "type": "preserved_input_integrity",
+        "path": "result.json",
+        "passed": not mismatches,
+        "detail": detail,
+        "current_input_sha256": current,
+    }
+
+
+def evaluate_preserved_output_integrity(result: dict[str, Any], run_dir: Path, workspace: Path) -> dict[str, Any]:
+    output_hash = result.get("output_hashes")
+    if not isinstance(output_hash, dict):
+        return {
+            "type": "preserved_output_integrity",
+            "path": "result.json",
+            "passed": False,
+            "detail": "missing output_hashes in result.json",
+        }
+
+    artifacts = run_dir / "artifacts"
+    current_artifact_hashes: dict[str, str] = {}
+    if artifacts.exists():
+        for path in sorted(child for child in artifacts.rglob("*") if child.is_file()):
+            current_artifact_hashes[path.relative_to(run_dir).as_posix()] = sha256_path(path)
+
+    try:
+        current_changed_hashes = changed_path_hashes(workspace)
+    except RunnerError as exc:
+        current_changed_hashes = {"<error>": str(exc)}
+
+    current = {
+        "artifacts_tree_sha256": sha256_path(artifacts) if artifacts.exists() else "missing",
+        "changed_paths_sha256": current_changed_hashes,
+        "artifact_files_sha256": current_artifact_hashes,
+    }
+    skipped_legacy_fields: list[str] = []
+    workspace_content_hash = sha256_path(workspace, exclude_top_level={".git"})
+    if "workspace_content_sha256" in output_hash:
+        current["workspace_content_sha256"] = workspace_content_hash
+    elif "workspace_tree_sha256" in output_hash:
+        # Older results included .git in workspace_tree_sha256. Git can refresh
+        # index metadata during a read-only recheck, so do not treat that legacy
+        # hash as portable preserved evidence.
+        skipped_legacy_fields.append("workspace_tree_sha256")
+    mismatches = [
+        f"{key}: result={output_hash.get(key, '<missing>')} current={value}"
+        for key, value in current.items()
+        if output_hash.get(key) != value
+    ]
+    if mismatches:
+        detail = "preserved output drift: " + "; ".join(mismatches)
+    else:
+        detail = "preserved output hashes match workspace and artifacts"
+        if skipped_legacy_fields:
+            detail += "; skipped non-portable legacy fields: " + ", ".join(skipped_legacy_fields)
+    return {
+        "type": "preserved_output_integrity",
+        "path": "result.json",
+        "passed": not mismatches,
+        "detail": detail,
+        "current_output_sha256": current,
+        "skipped_legacy_fields": skipped_legacy_fields,
+    }
+
+
+def checker_hashes_for_case(case: dict[str, Any]) -> dict[str, str]:
+    checker_hashes: dict[str, str] = {}
+    for check in case.get("checks", []):
+        script_name = CHECKER_SCRIPTS.get(check.get("type"))
+        if not script_name:
+            continue
+        script = CHECKERS_DIR / script_name
+        checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
+    return checker_hashes
 
 
 def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_timeout: int = CHECK_TIMEOUT) -> list[dict[str, Any]]:
@@ -1675,150 +1935,14 @@ def evaluate_checks(workspace: Path, checks: list[dict[str, Any]], *, check_time
                 detail = "all strings present" if passed else "missing: " + ", ".join(missing)
             else:
                 detail = "missing file"
-        elif check.get("type") == "reverse_tornado_loop":
-            script = CHECKERS_DIR / "reverse_tornado_loop.py"
+        elif check.get("type") in CHECKER_SCRIPTS:
+            script = CHECKERS_DIR / CHECKER_SCRIPTS[check["type"]]
             if not path.exists():
-                detail = "missing file"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_hard_gates":
-            script = CHECKERS_DIR / "okra_hard_gates.py"
-            if not path.exists():
-                detail = "missing file"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_store_governance":
-            script = CHECKERS_DIR / "okra_store_governance.py"
-            if not path.exists():
-                detail = "missing store"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_checkin_steering":
-            script = CHECKERS_DIR / "okra_checkin_steering.py"
-            if not path.exists():
-                detail = "missing store"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_learning_memory":
-            script = CHECKERS_DIR / "okra_learning_memory.py"
-            if not path.exists():
-                detail = "missing file"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_terminal_memory":
-            script = CHECKERS_DIR / "okra_terminal_memory.py"
-            if not path.exists():
-                detail = "missing file"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "okra_terminal_run_store":
-            script = CHECKERS_DIR / "okra_terminal_run_store.py"
-            if not path.exists():
-                detail = "missing store"
-            elif not script.exists():
-                detail = f"missing checker: {script}"
-            else:
-                try:
-                    proc = subprocess.run(
-                        [sys.executable, str(script), str(path)],
-                        cwd=workspace,
-                        text=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        timeout=check_timeout,
-                    )
-                    passed = proc.returncode == 0
-                    detail = proc.stdout.strip()
-                except subprocess.TimeoutExpired:
-                    detail = f"checker timeout after {check_timeout} seconds"
-        elif check.get("type") == "operations_stale_metrics":
-            script = CHECKERS_DIR / "operations_stale_metrics.py"
-            if not path.exists():
-                detail = "missing file"
+                detail = "missing store" if check["type"] in {
+                    "okra_store_governance",
+                    "okra_checkin_steering",
+                    "okra_terminal_run_store",
+                } else "missing file"
             elif not script.exists():
                 detail = f"missing checker: {script}"
             else:
@@ -1850,40 +1974,13 @@ def model_identity(agent: str) -> dict[str, str]:
 
 
 def input_hashes(case: dict[str, Any], prompt: str) -> dict[str, Any]:
-    checker_hashes: dict[str, str] = {}
-    for check in case.get("checks", []):
-        checker_type = check.get("type")
-        if checker_type == "reverse_tornado_loop":
-            script = CHECKERS_DIR / "reverse_tornado_loop.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_hard_gates":
-            script = CHECKERS_DIR / "okra_hard_gates.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_store_governance":
-            script = CHECKERS_DIR / "okra_store_governance.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_checkin_steering":
-            script = CHECKERS_DIR / "okra_checkin_steering.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_learning_memory":
-            script = CHECKERS_DIR / "okra_learning_memory.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_terminal_memory":
-            script = CHECKERS_DIR / "okra_terminal_memory.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "okra_terminal_run_store":
-            script = CHECKERS_DIR / "okra_terminal_run_store.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
-        elif checker_type == "operations_stale_metrics":
-            script = CHECKERS_DIR / "operations_stale_metrics.py"
-            checker_hashes[script.name] = sha256_path(script) if script.exists() else "missing"
     return {
         "prompt_sha256": sha256_text(prompt),
         "case_sha256": sha256_path(case["_path"]),
         "fixture_sha256": sha256_path(FIXTURES_DIR / case["fixture"]),
         "skill_sha256": sha256_path(skill_path(case["skill"])),
         "runner_sha256": sha256_path(REPO_ROOT / "scripts" / "okr-runner.py"),
-        "checker_sha256": checker_hashes,
+        "checker_sha256": checker_hashes_for_case(case),
     }
 
 
@@ -1909,7 +2006,7 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                 print(f"missing explicit model for scored run: set {model_env_name(agent)}", file=sys.stderr)
                 failures += 1
                 continue
-            run_name = f"{timestamp()}-{slug(case['id'])}-{agent}"
+            run_name = f"{timestamp()}-{slug(case['id'])}-{agent}-{slug(model_identity(agent)['requested'])}"
             run_dir = RUN_ROOT / "blindbox" / run_name
             workspace = prepare_workspace(case, run_dir)
             baseline_snapshot = workspace_snapshot(workspace)
@@ -1933,6 +2030,81 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
                     timeout=args.timeout,
                     heartbeat_seconds=args.heartbeat_seconds,
                 )
+                # Opt-in runner-orchestrated produce -> verify -> repair against the skill's
+                # PUBLIC completeness gate (never the hidden checkers). Default off => other
+                # cases and runs are byte-for-byte unaffected.
+                repair_iters = getattr(args, "verify_repair_iterations", 0) or 0
+                if not args.dry_run and repair_iters > 0 and case.get("verify_contract"):
+                    for attempt in range(1, repair_iters + 1):
+                        report = run_verify_gate(case, workspace)
+                        if report is None:
+                            break
+                        (run_dir / "artifacts" / f"verify-{attempt}.json").write_text(
+                            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+                        )
+                        append_progress(run_dir, {
+                            "event": "verify_gate",
+                            "attempt": attempt,
+                            "complete": report.get("complete"),
+                            "missing": [m.get("id") for m in report.get("missing", [])],
+                        })
+                        if report.get("complete") or report.get("complete") is None:
+                            break
+                        if attempt == repair_iters:
+                            break
+                        gaps = "\n".join(f"- {m.get('hint', '')}" for m in report.get("missing", []))
+                        repair_prompt = build_repair_prompt(case, workspace_root, gaps)
+                        code = run_agent_case(
+                            agent=agent,
+                            case=case,
+                            run_dir=run_dir,
+                            workspace=workspace,
+                            prompt=repair_prompt,
+                            isolation=args.isolation,
+                            dry_run=args.dry_run,
+                            timeout=args.timeout,
+                            heartbeat_seconds=args.heartbeat_seconds,
+                        )
+                    # Two-step public coherence review: read-only DETECT (artifact restored
+                    # afterward so it is byte-identical), then FIX only the rules the agent reports
+                    # as violated. A compliant artifact is detected clean and never edited (no
+                    # regression); a sloppy one is repaired against positive documented rules.
+                    coherence_rules = load_coherence_review(case)
+                    artifact_file = workspace / (case.get("allowed_paths") or [""])[0]
+                    if coherence_rules and artifact_file.is_file():
+                        for cround in range(1, 3):  # up to 2 detect->fix rounds; clean artifacts exit round 1
+                            pre_detect = artifact_file.read_text(encoding="utf-8")
+                            detect_prompt = build_coherence_detect_prompt(case, workspace_root, coherence_rules)
+                            run_agent_case(
+                                agent=agent, case=case, run_dir=run_dir, workspace=workspace,
+                                prompt=detect_prompt, isolation=args.isolation, dry_run=args.dry_run,
+                                timeout=args.timeout, heartbeat_seconds=args.heartbeat_seconds,
+                            )
+                            # guarantee detect is non-mutating
+                            artifact_file.write_text(pre_detect, encoding="utf-8")
+                            final_md = run_dir / "artifacts" / "final.md"
+                            verdict = final_md.read_text(encoding="utf-8", errors="ignore") if final_md.exists() else ""
+                            m = re.search(r"COHERENCE_VIOLATIONS:\s*([^\n]*)", verdict, re.IGNORECASE)
+                            payload = (m.group(1).strip() if m else "")
+                            nums = [int(x) for x in re.findall(r"\d+", payload)] if payload else []
+                            violated = bool(nums) and payload.upper() != "NONE"
+                            append_progress(run_dir, {
+                                "event": "coherence_detect", "round": cround,
+                                "verdict": payload[:120], "will_fix": violated,
+                            })
+                            if not violated:
+                                break
+                            fix_prompt = build_coherence_prompt(case, workspace_root, coherence_rules, only=nums)
+                            code = run_agent_case(
+                                agent=agent, case=case, run_dir=run_dir, workspace=workspace,
+                                prompt=fix_prompt, isolation=args.isolation, dry_run=args.dry_run,
+                                timeout=args.timeout, heartbeat_seconds=args.heartbeat_seconds,
+                            )
+                            creport = run_verify_gate(case, workspace)
+                            if creport is not None:
+                                (run_dir / "artifacts" / f"verify-coherence-{cround}.json").write_text(
+                                    json.dumps(creport, indent=2) + "\n", encoding="utf-8"
+                                )
                 checks = [] if args.dry_run else [evaluate_agent_execution(agent, run_dir, code)]
                 if not args.dry_run:
                     checks.extend(evaluate_checks(workspace, case["checks"]))
@@ -2009,6 +2181,103 @@ def cmd_blindbox(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def latest_blindbox_run(case_id: str, agent: str, model: str) -> Path:
+    pattern = f"*-{slug(case_id)}-{slug(agent)}-{slug(model)}"
+    matches: list[Path] = []
+    for path in sorted(path for path in (RUN_ROOT / "blindbox").glob(pattern) if path.is_dir()):
+        result_path = path / "result.json"
+        if not result_path.exists():
+            continue
+        try:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if result.get("dry_run"):
+            continue
+        matches.append(path)
+    if not matches:
+        raise RunnerError(f"no preserved blindbox run found for case={case_id} agent={agent} model={model}")
+    return matches[-1]
+
+
+def recheck_blindbox_run(run_dir: Path, *, forced_case: str | None, write: bool) -> tuple[dict[str, Any], bool]:
+    run_dir = run_dir.resolve()
+    result_path = run_dir / "result.json"
+    if not result_path.exists():
+        raise RunnerError(f"missing result.json: {result_path}")
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    case_id = forced_case or result.get("case")
+    if not isinstance(case_id, str) or not case_id:
+        raise RunnerError(f"cannot infer case for {run_dir}; pass --case")
+    case = load_cases([case_id])[0]
+    workspace = run_dir / "workspace"
+    if not workspace.exists():
+        raise RunnerError(f"missing preserved workspace: {workspace}")
+
+    checks = [
+        evaluate_sha256_sidecar(run_dir, "result.json"),
+        evaluate_preserved_input_integrity(case, result, run_dir, workspace),
+        evaluate_preserved_output_integrity(result, run_dir, workspace),
+    ]
+    checks.extend(evaluate_checks(workspace, case["checks"]))
+    checks.append(evaluate_allowed_paths(workspace, case["allowed_paths"]))
+    checks.append(evaluate_runtime_cleanup(run_dir))
+    checks.append(evaluate_credential_artifacts(run_dir))
+
+    failed_checks = [check for check in checks if not check["passed"]]
+    recheck = {
+        "type": "blindbox_recheck",
+        "run_dir": str(run_dir),
+        "case": case_id,
+        "agent": result.get("agent"),
+        "model": result.get("model"),
+        "rechecked_at": utc_now_iso(),
+        "current_case_sha256": sha256_path(case["_path"]),
+        "current_checker_sha256": checker_hashes_for_case(case),
+        "preserved_result_sha256": sha256_path(result_path),
+        "checks": checks,
+        "passed": not failed_checks,
+    }
+    if write:
+        path = run_dir / "recheck.json"
+        path.write_text(json.dumps(recheck, indent=2) + "\n", encoding="utf-8")
+        (run_dir / "recheck.sha256").write_text(f"{sha256_path(path)}  recheck.json\n", encoding="utf-8")
+    return recheck, not failed_checks
+
+
+def cmd_recheck_blindbox(args: argparse.Namespace) -> int:
+    run_dirs = [Path(path) for path in args.run_dir]
+    if args.latest:
+        if run_dirs:
+            raise RunnerError("pass either explicit run dirs or --latest, not both")
+        model = args.model or requested_model(args.agent)
+        if not model:
+            raise RunnerError("--latest requires --model or the agent model env var")
+        cases = load_cases(args.case)
+        run_dirs = [latest_blindbox_run(case["id"], args.agent, model) for case in cases]
+    if not run_dirs:
+        raise RunnerError("provide at least one run dir or pass --latest")
+
+    failures = 0
+    records: list[dict[str, Any]] = []
+    forced_case = args.case[0] if args.case and len(args.case) == 1 else None
+    for run_dir in run_dirs:
+        recheck, passed = recheck_blindbox_run(run_dir, forced_case=forced_case, write=not args.no_write)
+        records.append(recheck)
+        status = "ok" if passed else "failed"
+        model = recheck.get("model")
+        model_label = model.get("requested") if isinstance(model, dict) else model
+        print(f"recheck {status}: {recheck['case']} / {recheck.get('agent')} model={model_label} -> {recheck['run_dir']}")
+        for check in recheck["checks"]:
+            if not check["passed"]:
+                print(f"  check failed: {check['type']} {check.get('path')}: {check['detail']}")
+        if not passed:
+            failures += 1
+    if args.json:
+        print(json.dumps(records, indent=2))
+    return 1 if failures else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2039,7 +2308,24 @@ def build_parser() -> argparse.ArgumentParser:
     blindbox.add_argument("--fail-fast", action="store_true", help="stop after the first failed case")
     blindbox.add_argument("--timeout", type=int, default=1800)
     blindbox.add_argument("--heartbeat-seconds", type=int, default=DEFAULT_HEARTBEAT_SECONDS)
+    blindbox.add_argument(
+        "--verify-repair-iterations",
+        type=int,
+        default=0,
+        help="opt-in: runner-orchestrated produce->verify->repair against the skill's public "
+        "completeness gate for cases that declare verify_contract (0 = off, current behavior)",
+    )
     blindbox.set_defaults(func=cmd_blindbox)
+
+    recheck = sub.add_parser("recheck-blindbox", help="rerun deterministic checks over preserved blindbox artifacts")
+    recheck.add_argument("run_dir", nargs="*", help="preserved .runs/blindbox/<run> directories to recheck")
+    recheck.add_argument("--latest", action="store_true", help="recheck the latest run for each selected case/model")
+    recheck.add_argument("--agent", choices=["codex", "claude"], default="claude")
+    recheck.add_argument("--model", help="model label used in the preserved run name")
+    recheck.add_argument("--case", action="append", help="case id; with --latest, selects cases; with one explicit run dir, overrides inference")
+    recheck.add_argument("--no-write", action="store_true", help="do not write recheck.json next to result.json")
+    recheck.add_argument("--json", action="store_true", help="also print machine-readable recheck records")
+    recheck.set_defaults(func=cmd_recheck_blindbox)
 
     return parser
 
